@@ -1,4 +1,5 @@
 import { ItemFormat, type Prisma } from "@prisma/client";
+import { digitsOnly, extractIsbnCandidates } from "@/lib/barcode";
 
 export type CatalogSearchParams = {
   q?: string;
@@ -17,44 +18,62 @@ export function buildItemWhere(
   raw: CatalogSearchParams,
 ): Prisma.ItemWhereInput {
   const where: Prisma.ItemWhereInput = {};
+  const and: Prisma.ItemWhereInput[] = [];
 
   const barcode = raw.barcode?.trim();
-  const copyFilters: Prisma.ItemCopyWhereInput[] = [];
   if (barcode) {
-    copyFilters.push({
-      barcode: { equals: barcode, mode: "insensitive" },
-    });
+    const isbnCandidates = extractIsbnCandidates(barcode);
+    const matchOr: Prisma.ItemWhereInput[] = [
+      {
+        copies: {
+          some: { barcode: { equals: barcode, mode: "insensitive" } },
+        },
+      },
+    ];
+    for (const isbn of isbnCandidates) {
+      matchOr.push({ isbn: { equals: isbn } });
+    }
+    const d = digitsOnly(barcode);
+    if (d.length >= 10) {
+      matchOr.push({ isbn: { equals: d } });
+    }
+    and.push({ OR: matchOr });
   }
+
   if (raw.missing === "1") {
-    copyFilters.push({ missing: true });
-  }
-  if (copyFilters.length === 1) {
-    where.copies = { some: copyFilters[0] };
-  } else if (copyFilters.length > 1) {
-    where.copies = { some: { AND: copyFilters } };
+    and.push({ copies: { some: { missing: true } } });
   }
 
   const q = raw.q?.trim();
   if (q) {
-    where.OR = [
-      { title: { contains: q, mode: "insensitive" } },
-      { subtitle: { contains: q, mode: "insensitive" } },
-      { notes: { contains: q, mode: "insensitive" } },
-      {
-        authors: {
-          some: {
-            author: {
-              OR: [
-                { displayName: { contains: q, mode: "insensitive" } },
-                { normalizedName: { contains: q.toLowerCase() } },
-              ],
+    and.push({
+      OR: [
+        { title: { contains: q, mode: "insensitive" } },
+        { subtitle: { contains: q, mode: "insensitive" } },
+        { notes: { contains: q, mode: "insensitive" } },
+        { isbn: { contains: q, mode: "insensitive" } },
+        {
+          authors: {
+            some: {
+              author: {
+                OR: [
+                  { displayName: { contains: q, mode: "insensitive" } },
+                  { normalizedName: { contains: q.toLowerCase() } },
+                ],
+              },
             },
           },
         },
-      },
-      { tags: { has: q } },
-      { botanicalGenera: { has: q } },
-    ];
+        { tags: { has: q } },
+        { botanicalGenera: { has: q } },
+      ],
+    });
+  }
+
+  if (and.length === 1) {
+    Object.assign(where, and[0]);
+  } else if (and.length > 1) {
+    where.AND = and;
   }
 
   if (raw.format && raw.format !== "all") {

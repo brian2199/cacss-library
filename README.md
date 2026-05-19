@@ -75,8 +75,8 @@ Use the included `Dockerfile` or a Node buildpack:
 
 - **Public catalog** (`/catalog`) — fine-grained filters (genus, rarity, signed, decade, missing copies, reference-only, youth shelf).
 - **Rare protections** — shorter loan timers, admin approval queue (`/approvals`), acknowledgement tracking, visual badges.
-- **Imports** — CSV/Excel normalization with duplicate detection on ISBN or title+year; PDF preview extracts embedded text (scanned stacks await OCR microservices).
-- **Scan desk + QR labels** — `/scan` jumps straight into barcode-filtered catalog views; `/labels` prints authenticated PNG QR tiles.
+- **Imports** — CSV/Excel with preview, UPC/EAN columns, flexible headers, and duplicate detection on ISBN, barcode, or title+year; optional Open Library enrichment when ISBN/year is missing.
+- **Scan desk + QR labels** — `/scan` resolves UPC/ISBN against your catalog, looks up title metadata (Open Library + Google Books), and adds new items in one step; `/labels` prints authenticated PNG QR tiles.
 - **Audit trail** — `AuditLog` captures circulation + imports (expand with middleware hooks as needed).
 
 ## AI-ready hooks (future)
