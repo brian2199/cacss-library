@@ -16,7 +16,7 @@ Modern library operations console for the **Central Arizona Cactus & Succulent S
 
 ```bash
 cp .env.example .env
-# edit DATABASE_URL + AUTH_SECRET
+# edit AUTH_SECRET (see .env.example for DATABASE_URL — host port 5433 by default)
 
 # Start Postgres (or use Docker Compose db service only)
 docker compose up -d db
@@ -28,6 +28,8 @@ npm run dev
 ```
 
 Open [http://localhost:3001](http://localhost:3001). Demo credentials (after seed):
+
+**Windows:** generate `AUTH_SECRET` with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. If Postgres on port 5432 is already in use, keep `docker-compose.yml` db mapping at `5433:5432` and set `DATABASE_URL` to `localhost:5433` as in `.env.example`.
 
 | Role | Email | Password |
 | --- | --- | --- |
