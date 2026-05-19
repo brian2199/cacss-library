@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 42 35% 97%;
+    --foreground: 145 18% 14%;
+    --card: 42 30% 99%;
+    --card-foreground: 145 18% 14%;
+    --popover: 42 30% 99%;
+    --popover-foreground: 145 18% 14%;
+    --primary: 152 28% 34%;
+    --primary-foreground: 42 35% 98%;
+    --secondary: 38 32% 88%;
+    --secondary-foreground: 145 18% 18%;
+    --muted: 40 18% 92%;
+    --muted-foreground: 145 10% 38%;
+    --accent: 332 42% 94%;
+    --accent-foreground: 145 18% 14%;
+    --destructive: 0 72% 42%;
+    --destructive-foreground: 42 35% 98%;
+    --border: 40 16% 86%;
+    --input: 40 16% 86%;
+    --ring: 152 28% 34%;
+    --radius: 0.65rem;
+    --desert-sage: 152 22% 42%;
+    --desert-sand: 38 42% 82%;
+    --desert-clay: 22 35% 72%;
+    --desert-bloom: 332 55% 52%;
+  }
+
+  .dark {
+    --background: 145 14% 10%;
+    --foreground: 42 25% 94%;
+    --card: 145 14% 12%;
+    --card-foreground: 42 25% 94%;
+    --popover: 145 14% 12%;
+    --popover-foreground: 42 25% 94%;
+    --primary: 152 26% 46%;
+    --primary-foreground: 145 14% 8%;
+    --secondary: 145 12% 20%;
+    --secondary-foreground: 42 25% 94%;
+    --muted: 145 12% 18%;
+    --muted-foreground: 40 15% 72%;
+    --accent: 332 28% 22%;
+    --accent-foreground: 42 25% 94%;
+    --destructive: 0 62% 48%;
+    --destructive-foreground: 42 25% 98%;
+    --border: 145 12% 22%;
+    --input: 145 12% 22%;
+    --ring: 152 26% 46%;
+    --desert-sage: 152 22% 52%;
+    --desert-sand: 38 24% 58%;
+    --desert-clay: 22 28% 42%;
+    --desert-bloom: 332 48% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+  }
+}
