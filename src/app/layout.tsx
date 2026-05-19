@@ -28,6 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
+        suppressHydrationWarning
         className={`${sans.variable} ${serif.variable} min-h-screen font-sans`}
       >
         <Providers>{children}</Providers>
