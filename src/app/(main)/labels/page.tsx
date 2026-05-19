@@ -10,7 +10,7 @@ export default async function LabelsPage() {
   await requireRole(["LIBRARIAN", "ADMIN"]);
 
   const hdrs = await headers();
-  const host = hdrs.get("x-forwarded-host") ?? hdrs.get("host") ?? "localhost:3000";
+  const host = hdrs.get("x-forwarded-host") ?? hdrs.get("host") ?? "localhost:3001";
   const proto = hdrs.get("x-forwarded-proto") ?? "http";
   const baseUrl = `${proto}://${host}`;
 

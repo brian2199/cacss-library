@@ -27,7 +27,7 @@ npm run db:seed             # prisma db seed
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Demo credentials (after seed):
+Open [http://localhost:3001](http://localhost:3001). Demo credentials (after seed):
 
 | Role | Email | Password |
 | --- | --- | --- |
