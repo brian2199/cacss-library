@@ -109,7 +109,7 @@ export default async function DashboardPage() {
             <Link href="/catalog">Public catalog</Link>
           </Button>
           <Button asChild>
-            <Link href="/loans">Loan desk</Link>
+            <Link href="/checkout">Checkout desk</Link>
           </Button>
         </div>
       </div>

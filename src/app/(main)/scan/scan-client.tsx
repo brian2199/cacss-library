@@ -31,13 +31,17 @@ export default function ScanDeskPageClient() {
     <div className="space-y-8">
       <div>
         <p className="text-sm uppercase tracking-wide text-muted-foreground">
-          Fast desk
+          Cataloging
         </p>
         <h1 className="font-[family-name:var(--font-display)] text-4xl font-semibold tracking-tight">
-          Scan & jump
+          Add books (scan)
         </h1>
         <p className="mt-2 max-w-3xl text-muted-foreground">
-          Works with USB scanners (keyboard wedge), mobile cameras, and pasted barcodes from member cards.
+          Look up UPC/ISBN and add new titles. To check books out to members, use the{" "}
+          <a href="/checkout" className="font-medium text-primary underline-offset-4 hover:underline">
+            Checkout desk
+          </a>
+          .
         </p>
       </div>
 

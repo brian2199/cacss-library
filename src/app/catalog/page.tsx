@@ -1,11 +1,13 @@
 import Link from "next/link";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { buildItemWhere, type CatalogSearchParams } from "@/lib/catalog-where";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ItemProtectionBadges } from "@/components/item-badges";
+import { CatalogSearchForm } from "@/components/catalog-search-form";
+import { formatLabel, isSpecialItem } from "@/lib/item-display";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,25 @@ export default async function CatalogPage({
   searchParams: Promise<CatalogSearchParams>;
 }) {
   const sp = await searchParams;
-  const where = buildItemWhere(sp);
+  const session = await auth();
+  const staff =
+    session?.user?.role === "LIBRARIAN" || session?.user?.role === "ADMIN";
+
+  const hasQuery =
+    Boolean(sp.q?.trim()) ||
+    Boolean(sp.barcode?.trim()) ||
+    Boolean(sp.decade?.trim()) ||
+    sp.referenceOnly === "1" ||
+    sp.signed === "1" ||
+    sp.fragile === "1" ||
+    sp.rare === "1" ||
+    sp.missing === "1" ||
+    sp.youth === "1";
+
+  const where = buildItemWhere({
+    ...sp,
+    format: sp.format ?? (hasQuery ? "all" : "BOOK"),
+  });
 
   const items = await prisma.item.findMany({
     where,
@@ -23,162 +43,112 @@ export default async function CatalogPage({
     include: {
       category: true,
       authors: { include: { author: true }, orderBy: { sortOrder: "asc" } },
-      copies: true,
+      copies: {
+        include: {
+          loans: {
+            where: { status: { in: ["ACTIVE", "PENDING_RARE_APPROVAL"] } },
+          },
+        },
+      },
     },
     take: 80,
   });
+
+  const barcodeScan = sp.barcode?.trim();
 
   return (
     <div className="space-y-8">
       <div className="space-y-2">
         <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight">
-          Society catalog
+          Library catalog
         </h1>
         <p className="max-w-2xl text-muted-foreground">
-          Search rare references, youth shelves, convention guides, and archival folders.
-          Try genus names like Haworthia, filters for signed editions, or decade facets such as{" "}
-          <kbd className="rounded bg-muted px-1">1950s</kbd>.
+          Search books by title or author. Most of our collection is regular circulating material —
+          use advanced filters only when you need rare or specialty titles.
         </p>
       </div>
 
+      {barcodeScan ? (
+        <AlertBanner barcode={barcodeScan} count={items.length} />
+      ) : null}
+
       <Card>
-        <CardHeader>
-          <CardTitle>Smart filters</CardTitle>
-          <CardDescription>
-            Server-side filters pair with fuzzy matching on titles, authors, tags, and botanical genera.
-          </CardDescription>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg">Search</CardTitle>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-4 md:grid-cols-4" method="get" action="/catalog">
-            <div className="md:col-span-2">
-              <label className="sr-only" htmlFor="q">
-                Search
-              </label>
-              <Input
-                id="q"
-                name="q"
-                placeholder="Titles, authors, genus, tags…"
-                defaultValue={sp.q ?? ""}
-              />
-            </div>
-            <div>
-              <label className="sr-only" htmlFor="decade">
-                Decade
-              </label>
-              <Input
-                id="decade"
-                name="decade"
-                placeholder="1950s"
-                defaultValue={sp.decade ?? ""}
-              />
-            </div>
-            <div>
-              <label className="sr-only" htmlFor="format">
-                Format
-              </label>
-              <select
-                id="format"
-                name="format"
-                defaultValue={sp.format ?? "all"}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="all">All formats</option>
-                <option value="BOOK">Books</option>
-                <option value="JOURNAL">Journals</option>
-                <option value="MAGAZINE">Magazines</option>
-                <option value="DVD">DVDs</option>
-                <option value="CONVENTION_GUIDE">Convention guides</option>
-                <option value="YOUTH_BOOK">Youth books</option>
-                <option value="REFERENCE_MATERIAL">Reference</option>
-                <option value="ARCHIVAL_COLLECTION">Archival</option>
-              </select>
-            </div>
-            <div className="flex flex-wrap gap-4 md:col-span-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="referenceOnly" value="1" defaultChecked={sp.referenceOnly === "1"} />
-                Reference only
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="signed" value="1" defaultChecked={sp.signed === "1"} />
-                Signed editions
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="fragile" value="1" defaultChecked={sp.fragile === "1"} />
-                Fragile
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="rare" value="1" defaultChecked={sp.rare === "1"} />
-                Rare / protected
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="missing" value="1" defaultChecked={sp.missing === "1"} />
-                Missing copies exist
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="youth" value="1" defaultChecked={sp.youth === "1"} />
-                Youth shelf
-              </label>
-            </div>
-            <div className="md:col-span-4 flex gap-2">
-              <Button type="submit">Apply</Button>
-              <Button type="reset" variant="outline" asChild>
-                <Link href="/catalog">Reset</Link>
-              </Button>
-            </div>
-          </form>
+          <CatalogSearchForm sp={sp} showAdvanced={staff} />
         </CardContent>
       </Card>
 
-      <div className="grid gap-4">
+      <p className="text-sm text-muted-foreground">
+        {items.length} result{items.length === 1 ? "" : "s"}
+        {items.length >= 80 ? " (showing first 80)" : ""}
+      </p>
+
+      <div className="grid gap-3">
         {items.length === 0 ? (
-          <p className="text-muted-foreground">No matches yet — widen your search.</p>
+          <p className="text-muted-foreground">No matches — try a shorter search or All types.</p>
         ) : null}
         {items.map((item) => {
-          const missingCopy = item.copies.some((c) => c.missing);
+          const available = item.copies.filter((c) => !c.missing && c.loans.length === 0).length;
+          const total = item.copies.filter((c) => !c.missing).length;
+          const special = isSpecialItem(item);
+
           return (
             <Card key={item.id} className="shadow-soft transition hover:shadow-card">
-              <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <CardTitle className="font-[family-name:var(--font-display)] text-xl">
+              <CardHeader className="flex flex-row items-start justify-between gap-4 py-4">
+                <div className="min-w-0 flex-1">
+                  <CardTitle className="font-[family-name:var(--font-display)] text-lg leading-snug">
                     <Link href={`/catalog/${item.id}`} className="hover:underline">
                       {item.title}
                     </Link>
                   </CardTitle>
-                  {item.subtitle ? (
-                    <CardDescription>{item.subtitle}</CardDescription>
-                  ) : null}
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {item.authors.map((ia) => ia.author.displayName).join(", ")}
+                  <CardDescription className="mt-1">
+                    {item.authors.map((ia) => ia.author.displayName).join(", ") || "Unknown author"}
                     {item.publicationYear ? ` · ${item.publicationYear}` : ""}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <Badge variant="outline">{item.format.replaceAll("_", " ")}</Badge>
-                    {item.category ? (
-                      <Badge variant="secondary">{item.category.name}</Badge>
+                  </CardDescription>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                    {item.format !== "BOOK" ? (
+                      <Badge variant="outline">{formatLabel(item.format)}</Badge>
                     ) : null}
-                    {missingCopy ? <Badge variant="destructive">Missing copy tracked</Badge> : null}
+                    {total > 0 ? (
+                      <span
+                        className={
+                          available > 0
+                            ? "text-primary font-medium"
+                            : "text-muted-foreground"
+                        }
+                      >
+                        {available > 0
+                          ? `${available} of ${total} available`
+                          : "All copies out or unavailable"}
+                      </span>
+                    ) : null}
                   </div>
-                  <div className="mt-3">
-                    <ItemProtectionBadges item={item} />
-                  </div>
-                  {item.botanicalGenera.length ? (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {item.botanicalGenera.map((g) => (
-                        <Badge key={g} variant="sage">
-                          {g}
-                        </Badge>
-                      ))}
+                  {special ? (
+                    <div className="mt-2">
+                      <ItemProtectionBadges item={item} />
                     </div>
                   ) : null}
                 </div>
-                <Button asChild variant="outline">
-                  <Link href={`/catalog/${item.id}`}>Open record</Link>
+                <Button asChild variant="outline" size="sm" className="shrink-0">
+                  <Link href={`/catalog/${item.id}`}>Details</Link>
                 </Button>
               </CardHeader>
             </Card>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function AlertBanner({ barcode, count }: { barcode: string; count: number }) {
+  return (
+    <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
+      Barcode scan: <code className="font-mono text-xs">{barcode}</code>
+      {count === 0 ? " — no match in catalog." : ` — ${count} match${count === 1 ? "" : "es"}.`}
     </div>
   );
 }

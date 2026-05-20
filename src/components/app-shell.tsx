@@ -1,7 +1,18 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { UserRole } from "@prisma/client";
-import { Library, LayoutDashboard, Users, ScanLine, Upload, BarChart3, Tags, ShieldCheck, BookOpen } from "lucide-react";
+import {
+  Library,
+  LayoutDashboard,
+  Users,
+  ScanLine,
+  Upload,
+  BarChart3,
+  Tags,
+  ShieldCheck,
+  BookOpen,
+  BookCheck,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -15,6 +26,12 @@ const links: {
 }[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/catalog", label: "Catalog", icon: BookOpen },
+  {
+    href: "/checkout",
+    label: "Checkout desk",
+    icon: BookCheck,
+    roles: ["LIBRARIAN", "ADMIN"],
+  },
   { href: "/loans", label: "Loans & holds", icon: Library },
   {
     href: "/imports",
@@ -30,7 +47,7 @@ const links: {
   },
   {
     href: "/scan",
-    label: "Scan desk",
+    label: "Add books",
     icon: ScanLine,
     roles: ["LIBRARIAN", "ADMIN"],
   },
