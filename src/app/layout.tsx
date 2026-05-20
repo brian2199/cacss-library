@@ -18,6 +18,10 @@ export const metadata: Metadata = {
   title: "CACSS Library | Central Arizona Cactus & Succulent Society",
   description:
     "Specialty lending catalog for rare botanical books, journals, and archival materials stewarded by CACSS volunteers.",
+  icons: {
+    icon: "/logo-cacss.webp",
+    apple: "/logo-cacss.webp",
+  },
 };
 
 export default function RootLayout({
