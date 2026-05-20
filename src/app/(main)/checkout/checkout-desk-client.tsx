@@ -4,9 +4,13 @@ import { useCallback, useRef, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
+  createDeskMember,
   deskCheckout,
   deskReturnByBarcode,
   resolveForCheckout,
+  searchBooksForCheckout,
+  selectItemForCheckout,
+  type BookSearchHit,
   type DeskMember,
   type ResolveForCheckoutResult,
 } from "@/actions/checkout-desk";
@@ -31,15 +35,23 @@ const Scanner = dynamic(() => import("@/components/html5-barcode-scanner"), {
 });
 
 export default function CheckoutDeskClient({
-  members,
+  members: initialMembers,
   initialTab = "checkout",
 }: {
   members: DeskMember[];
   initialTab?: "checkout" | "return";
 }) {
   const [tab, setTab] = useState(initialTab);
-  const [memberId, setMemberId] = useState(members[0]?.id ?? "");
+  const [members, setMembers] = useState(initialMembers);
+  const [memberId, setMemberId] = useState(initialMembers[0]?.id ?? "");
   const [memberSearch, setMemberSearch] = useState("");
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [bookMode, setBookMode] = useState<"scan" | "search">("search");
+  const [titleSearch, setTitleSearch] = useState("");
+  const [searchHits, setSearchHits] = useState<BookSearchHit[]>([]);
   const [bookCode, setBookCode] = useState("");
   const [returnCode, setReturnCode] = useState("");
   const [resolved, setResolved] = useState<ResolveForCheckoutResult | null>(null);
@@ -113,6 +125,72 @@ export default function CheckoutDeskClient({
     });
   };
 
+  const runTitleSearch = () => {
+    const q = titleSearch.trim();
+    if (q.length < 2) {
+      setError("Type at least 2 characters to search.");
+      return;
+    }
+    setError(null);
+    setSearchHits([]);
+    start(async () => {
+      try {
+        const hits = await searchBooksForCheckout(q);
+        setSearchHits(hits);
+        if (hits.length === 0) {
+          setError("No available copies match that search.");
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Search failed.");
+      }
+    });
+  };
+
+  const pickSearchHit = (hit: BookSearchHit) => {
+    setError(null);
+    setMessage(null);
+    start(async () => {
+      try {
+        const res = await selectItemForCheckout(hit.itemId);
+        setResolved(res);
+        setBookCode("");
+        if (res.status === "ready" && res.copies.length === 1) {
+          setSelectedCopyId(res.copies[0]!.copyId);
+        } else {
+          setSelectedCopyId("");
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not load item.");
+      }
+    });
+  };
+
+  const handleAddMember = () => {
+    start(async () => {
+      try {
+        const created = await createDeskMember({
+          name: newName,
+          email: newEmail,
+          phone: newPhone || undefined,
+        });
+        setMembers((prev) =>
+          [...prev, created].sort((a, b) => a.label.localeCompare(b.label)),
+        );
+        setMemberId(created.id);
+        setNewName("");
+        setNewEmail("");
+        setNewPhone("");
+        setShowAddMember(false);
+        setMessage(
+          `Added ${created.label}. They can sign in with ${created.email} and temporary password cacss-demo.`,
+        );
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not add member.");
+      }
+    });
+  };
+
   const handleReturn = () => {
     start(async () => {
       try {
@@ -136,8 +214,8 @@ export default function CheckoutDeskClient({
           Check out & return
         </h1>
         <p className="mt-2 max-w-3xl text-muted-foreground">
-          Pick the member, scan the book barcode, and check out in one place. Most books are standard
-          loans — rare titles may need admin approval after checkout.
+          Pick the member, then find the book by title or scan its barcode. Most loans are standard —
+          rare titles may need admin approval after checkout.
         </p>
       </div>
 
@@ -186,34 +264,153 @@ export default function CheckoutDeskClient({
                   </div>
                 ) : null}
               </div>
+              <div className="border-t pt-4">
+                {showAddMember ? (
+                  <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+                    <p className="text-sm font-medium">Quick add member</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="new-name">Full name</Label>
+                        <Input
+                          id="new-name"
+                          value={newName}
+                          onChange={(e) => setNewName(e.target.value)}
+                          placeholder="Pat Smith"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="new-email">Email</Label>
+                        <Input
+                          id="new-email"
+                          type="email"
+                          value={newEmail}
+                          onChange={(e) => setNewEmail(e.target.value)}
+                          placeholder="pat@example.com"
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label htmlFor="new-phone">Phone (optional)</Label>
+                        <Input
+                          id="new-phone"
+                          value={newPhone}
+                          onChange={(e) => setNewPhone(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Temporary password: <code className="rounded bg-muted px-1">cacss-demo</code> —
+                      ask them to change it after first login.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        onClick={handleAddMember}
+                        disabled={pending || !newName.trim() || !newEmail.trim()}
+                      >
+                        {pending ? "Saving…" : "Save member"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setShowAddMember(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowAddMember(true)}
+                  >
+                    + Add new member
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle>2. Book</CardTitle>
-              <CardDescription>Scan UPC, ISBN, or copy barcode</CardDescription>
+              <CardDescription>Search by title or author, or scan a barcode</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                <Input
-                  className="max-w-md font-mono"
-                  placeholder="Scan book barcode…"
-                  value={bookCode}
-                  onChange={(e) => handleBookInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && runResolve(bookCode)}
-                  autoFocus
-                />
-                <Button type="button" onClick={() => runResolve(bookCode)} disabled={pending}>
-                  {pending ? "Looking…" : "Find book"}
-                </Button>
-              </div>
-              <Scanner
-                onDetected={(code) => {
-                  setBookCode(code);
-                  runResolve(code);
-                }}
-              />
+              <Tabs
+                value={bookMode}
+                onValueChange={(v) => setBookMode(v as "scan" | "search")}
+              >
+                <TabsList>
+                  <TabsTrigger value="search">Search by name</TabsTrigger>
+                  <TabsTrigger value="scan">Scan barcode</TabsTrigger>
+                </TabsList>
+                <TabsContent value="search" className="mt-4 space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    <Input
+                      className="max-w-lg"
+                      placeholder="Book title or author…"
+                      value={titleSearch}
+                      onChange={(e) => setTitleSearch(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && runTitleSearch()}
+                      autoFocus
+                    />
+                    <Button type="button" onClick={runTitleSearch} disabled={pending}>
+                      {pending ? "Searching…" : "Search"}
+                    </Button>
+                  </div>
+                  {searchHits.length > 0 ? (
+                    <ul className="divide-y rounded-lg border">
+                      {searchHits.map((hit) => (
+                        <li key={hit.itemId}>
+                          <button
+                            type="button"
+                            className="flex w-full flex-col gap-1 px-4 py-3 text-left hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
+                            onClick={() => pickSearchHit(hit)}
+                          >
+                            <span>
+                              <span className="font-medium">{hit.title}</span>
+                              <span className="mt-0.5 block text-sm text-muted-foreground">
+                                {hit.authors}
+                                {hit.publicationYear ? ` · ${hit.publicationYear}` : ""}
+                              </span>
+                            </span>
+                            <span className="flex shrink-0 items-center gap-2 text-sm">
+                              {hit.isSpecial ? (
+                                <Badge variant="bloom">Special</Badge>
+                              ) : null}
+                              <Badge variant="secondary">
+                                {hit.availableCount} available
+                              </Badge>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </TabsContent>
+                <TabsContent value="scan" className="mt-4 space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    <Input
+                      className="max-w-md font-mono"
+                      placeholder="Scan book barcode…"
+                      value={bookCode}
+                      onChange={(e) => handleBookInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && runResolve(bookCode)}
+                    />
+                    <Button type="button" onClick={() => runResolve(bookCode)} disabled={pending}>
+                      {pending ? "Looking…" : "Find book"}
+                    </Button>
+                  </div>
+                  <Scanner
+                    onDetected={(code) => {
+                      setBookCode(code);
+                      runResolve(code);
+                    }}
+                  />
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
 

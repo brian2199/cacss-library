@@ -1,11 +1,16 @@
 "use server";
 
+import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { checkoutCopy, returnLoan } from "@/actions/loans";
+import { auditLog } from "@/lib/audit";
 import { normalizeScanInput, extractIsbnCandidates, digitsOnly } from "@/lib/barcode";
 import { isSpecialItem } from "@/lib/item-display";
+import { MembershipStatus, UserRole } from "@prisma/client";
+
+const DEFAULT_MEMBER_PASSWORD = "cacss-demo";
 
 async function requireStaff() {
   const session = await auth();
@@ -102,6 +107,174 @@ async function copiesWithAvailability(itemId: string): Promise<DeskCopyOption[]>
       barcode: c.barcode,
       shelfHint: c.shelfLocation?.label ?? c.shelfLocation?.code ?? null,
     }));
+}
+
+export type BookSearchHit = {
+  itemId: string;
+  title: string;
+  authors: string;
+  publicationYear: number | null;
+  availableCount: number;
+  isSpecial: boolean;
+};
+
+export async function searchBooksForCheckout(query: string): Promise<BookSearchHit[]> {
+  await requireStaff();
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const items = await prisma.item.findMany({
+    where: {
+      checkoutEligible: true,
+      referenceOnly: false,
+      OR: [
+        { title: { contains: q, mode: "insensitive" } },
+        { subtitle: { contains: q, mode: "insensitive" } },
+        {
+          authors: {
+            some: {
+              author: {
+                displayName: { contains: q, mode: "insensitive" },
+              },
+            },
+          },
+        },
+        { isbn: { contains: q, mode: "insensitive" } },
+      ],
+    },
+    include: {
+      authors: { include: { author: true }, orderBy: { sortOrder: "asc" } },
+      copies: {
+        where: { missing: false },
+        include: {
+          loans: {
+            where: { status: { in: ["ACTIVE", "PENDING_RARE_APPROVAL"] } },
+          },
+        },
+      },
+    },
+    orderBy: { title: "asc" },
+    take: 20,
+  });
+
+  const hits: BookSearchHit[] = [];
+  for (const item of items) {
+    const availableCount = item.copies.filter((c) => c.loans.length === 0).length;
+    if (availableCount === 0) continue;
+    hits.push({
+      itemId: item.id,
+      title: item.title,
+      authors:
+        item.authors.map((a) => a.author.displayName).join(", ") || "Unknown author",
+      publicationYear: item.publicationYear,
+      availableCount,
+      isSpecial: isSpecialItem(item),
+    });
+  }
+  return hits;
+}
+
+async function buildReadyResult(itemId: string): Promise<ResolveForCheckoutResult> {
+  const item = await prisma.item.findUnique({
+    where: { id: itemId },
+    include: { authors: { include: { author: true }, orderBy: { sortOrder: "asc" } } },
+  });
+  if (!item) {
+    return { status: "not_found", message: "Item not found." };
+  }
+  if (item.referenceOnly || !item.checkoutEligible) {
+    return {
+      status: "unavailable",
+      title: item.title,
+      reason: "Reference-only — cannot leave the library.",
+    };
+  }
+  const copies = await copiesWithAvailability(item.id);
+  if (!copies.length) {
+    return {
+      status: "unavailable",
+      title: item.title,
+      reason: "No copies available to check out.",
+    };
+  }
+  return {
+    status: "ready",
+    itemId: item.id,
+    title: item.title,
+    authors: item.authors.map((a) => a.author.displayName).join(", ") || "Unknown author",
+    isSpecial: isSpecialItem(item),
+    copies,
+  };
+}
+
+export async function selectItemForCheckout(
+  itemId: string,
+): Promise<ResolveForCheckoutResult> {
+  await requireStaff();
+  return buildReadyResult(itemId);
+}
+
+export async function createDeskMember(input: {
+  name: string;
+  email: string;
+  phone?: string;
+}): Promise<DeskMember> {
+  const session = await requireStaff();
+  const name = input.name.trim();
+  const email = input.email.trim().toLowerCase();
+  if (!name) throw new Error("Name is required.");
+  if (!email || !email.includes("@")) throw new Error("Valid email is required.");
+
+  const existing = await prisma.user.findUnique({
+    where: { email },
+    include: { memberProfile: true },
+  });
+  if (existing) {
+    if (existing.memberProfile) {
+      throw new Error(
+        `${existing.name ?? email} already has a member profile. Select them from the list.`,
+      );
+    }
+    throw new Error("That email is already used by a staff account.");
+  }
+
+  const passwordHash = await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12);
+  const user = await prisma.user.create({
+    data: {
+      email,
+      name,
+      role: UserRole.MEMBER,
+      passwordHash,
+      memberProfile: {
+        create: {
+          membershipStatus: MembershipStatus.ACTIVE,
+          phone: input.phone?.trim() || null,
+        },
+      },
+    },
+    include: { memberProfile: true },
+  });
+
+  if (!user.memberProfile) throw new Error("Could not create member profile.");
+
+  await auditLog({
+    actorId: session.user.id,
+    action: "CREATE",
+    entityType: "MemberProfile",
+    entityId: user.memberProfile.id,
+    summary: `Desk added member ${name}`,
+    payload: { email },
+  });
+
+  revalidatePath("/checkout");
+  revalidatePath("/members");
+
+  return {
+    id: user.memberProfile.id,
+    label: name,
+    email,
+    activeLoans: 0,
+  };
 }
 
 export async function resolveForCheckout(
