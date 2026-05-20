@@ -1,6 +1,6 @@
 "use client";
 
-import { Html5QrcodeScanner } from "html5-qrcode";
+import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { useEffect, useRef } from "react";
 
 export default function Html5BarcodeScanner({
@@ -14,7 +14,20 @@ export default function Html5BarcodeScanner({
   useEffect(() => {
     const scanner = new Html5QrcodeScanner(
       "cacss-qr-reader",
-      { fps: 8, qrbox: { width: 240, height: 240 } },
+      {
+        fps: 10,
+        qrbox: { width: 280, height: 160 },
+        rememberLastUsedCamera: true,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.QR_CODE,
+        ],
+      },
       false,
     );
     scanner.render(
@@ -30,6 +43,9 @@ export default function Html5BarcodeScanner({
   }, []);
 
   return (
-    <div id="cacss-qr-reader" className="w-full max-w-md rounded-xl border bg-muted/40 p-2" />
+    <div
+      id="cacss-qr-reader"
+      className="w-full max-w-lg rounded-xl border bg-muted/40 p-2"
+    />
   );
 }
