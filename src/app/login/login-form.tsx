@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { CacssLogo } from "@/components/cacss-logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,14 @@ export function LoginForm() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-secondary/50 px-4 py-16">
+      <CacssLogo
+        href="/"
+        size="lg"
+        showLibraryLabel
+        tagline="Volunteer console"
+        className="mb-8"
+        priority
+      />
       <Card className="w-full max-w-md shadow-card">
         <CardHeader>
           <CardTitle className="font-[family-name:var(--font-display)] text-2xl">

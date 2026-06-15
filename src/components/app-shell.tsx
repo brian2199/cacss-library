@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SignOutButton } from "@/components/sign-out-button";
+import { CacssLogo } from "@/components/cacss-logo";
 
 const links: {
   href: string;
@@ -82,12 +83,7 @@ export function AppShell({
     <div className="min-h-screen bg-background md:flex">
       <aside className="border-b bg-card md:w-60 md:border-b-0 md:border-r md:shadow-soft">
         <div className="flex items-center justify-between gap-2 px-4 py-4 md:flex-col md:items-stretch">
-          <Link href="/dashboard" className="block">
-            <p className="font-[family-name:var(--font-display)] text-lg font-semibold text-primary">
-              CACSS Library
-            </p>
-            <p className="text-xs text-muted-foreground">Volunteer console</p>
-          </Link>
+          <CacssLogo href="/dashboard" size="md" tagline="Volunteer console" />
           <div className="flex items-center gap-2 md:w-full md:justify-between">
             <ThemeToggle />
             <SignOutButton />

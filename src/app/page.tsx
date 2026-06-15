@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CacssLogo } from "@/components/cacss-logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -13,14 +14,13 @@ export default function HomePage() {
         }}
       />
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-8">
-        <div>
-          <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-primary">
-            CACSS Library
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Central Arizona Cactus & Succulent Society
-          </p>
-        </div>
+        <CacssLogo
+          href="/"
+          size="lg"
+          showLibraryLabel
+          tagline="Central Arizona Cactus & Succulent Society"
+          priority
+        />
         <Button asChild>
           <Link href="/login">Volunteer sign in</Link>
         </Button>
