@@ -46,6 +46,34 @@ docker compose up --build
 
 The web container runs `prisma migrate deploy` before `npm run start`.
 
+## Cloudflare Workers (live preview)
+
+This app can deploy to Cloudflare Workers via [OpenNext](https://opennext.js.org/cloudflare).
+
+**You need:**
+
+1. A Cloudflare account + [API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/) (`Workers Scripts: Edit`)
+2. A hosted PostgreSQL database (e.g. [Neon](https://neon.tech) free tier) — run `npx prisma migrate deploy` and `npm run db:seed` against it once
+3. Secrets: `DATABASE_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST=true`
+
+**Deploy from your machine:**
+
+```bash
+npm ci
+export CLOUDFLARE_API_TOKEN="your-token"
+export CLOUDFLARE_ACCOUNT_ID="your-account-id"
+export DATABASE_URL="postgresql://..."
+export AUTH_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")"
+export AUTH_TRUST_HOST="true"
+npm run deploy
+```
+
+Your app will be at `https://cacss-library.<your-subdomain>.workers.dev`.
+
+**Or use GitHub Actions:** add repo secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DATABASE_URL`, `AUTH_SECRET` — pushes to `main` run `.github/workflows/deploy-cloudflare.yml`.
+
+**Or connect the repo in Cloudflare Dashboard:** Workers & Pages → Create → Import Git → set build command `npm run deploy` and the same env vars.
+
 ## Deployment notes
 
 ### Vercel (frontend)

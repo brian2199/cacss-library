@@ -4,10 +4,12 @@ node_modules/
 # Next.js
 .next/
 out/
+.open-next/
 
 # Env
 .env
 .env*.local
+.dev.vars
 
 # Debug / logs
 npm-debug.log*
@@ -30,3 +32,6 @@ prisma/*.db-journal
 
 # Uploads (local dev)
 public/uploads/
+
+# Cloudflare / Wrangler
+.wrangler/
