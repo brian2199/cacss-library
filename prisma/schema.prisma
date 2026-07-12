@@ -81,6 +81,13 @@ enum NotificationType {
   RARE_APPROVAL_RESULT
 }
 
+enum ImportBatchStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  PARTIAL
+}
+
 model User {
   id            String    @id @default(cuid())
   email         String    @unique
@@ -92,13 +99,14 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts       Account[]
-  sessions       Session[]
-  memberProfile  MemberProfile?
-  auditLogs      AuditLog[]
-  notifications  Notification[]
-  loansApproved  Loan[]             @relation("LoanApprover")
-  conditionLogs  ItemConditionHistory[]
+  accounts      Account[]
+  sessions      Session[]
+  memberProfile MemberProfile?
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  loansApproved Loan[]                 @relation("LoanApprover")
+  conditionLogs ItemConditionHistory[]
+  importBatches ImportBatch[]
 }
 
 model Account {
@@ -138,18 +146,18 @@ model VerificationToken {
 }
 
 model MemberProfile {
-  id               String             @id @default(cuid())
-  userId           String             @unique
+  id               String           @id @default(cuid())
+  userId           String           @unique
   phone            String?
-  membershipStatus MembershipStatus   @default(ACTIVE)
+  membershipStatus MembershipStatus @default(ACTIVE)
   favoriteTopics   String[]         @default([])
   notesInternal    String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  loans         Loan[]
-  reservations  Reservation[]
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loans        Loan[]
+  reservations Reservation[]
 }
 
 model Branch {
@@ -171,7 +179,7 @@ model ShelfLocation {
   label     String?
   createdAt DateTime @default(now())
 
-  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  branch Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
   copies ItemCopy[]
 
   @@unique([branchId, code])
@@ -222,7 +230,7 @@ model Donor {
 
 /// Bibliographic / catalog record (work-level)
 model Item {
-  id                     String      @id @default(cuid())
+  id                     String       @id @default(cuid())
   title                  String
   subtitle               String?
   publicationYear        Int?
@@ -234,67 +242,67 @@ model Item {
   format                 ItemFormat
   categoryId             String?
   branchId               String?
-  language               String      @default("en")
-  rarityScore            Int         @default(0)
-  estimatedValue         Decimal?    @db.Decimal(12, 2)
-  checkoutEligible       Boolean     @default(true)
-  referenceOnly          Boolean     @default(false)
-  signedEdition          Boolean     @default(false)
-  outOfPrint             Boolean     @default(false)
-  fragile                Boolean     @default(false)
-  archival               Boolean     @default(false)
-  doNotRemoveFromLibrary Boolean     @default(false)
-  rareProtected          Boolean     @default(false)
-  loanDaysDefault        Int         @default(21)
-  loanDaysRare           Int         @default(7)
-  requiresRareApproval   Boolean     @default(false)
-  botanicalGenera        String[]    @default([])
-  tags                   String[]    @default([])
+  language               String       @default("en")
+  rarityScore            Int          @default(0)
+  estimatedValue         Decimal?     @db.Decimal(12, 2)
+  checkoutEligible       Boolean      @default(true)
+  referenceOnly          Boolean      @default(false)
+  signedEdition          Boolean      @default(false)
+  outOfPrint             Boolean      @default(false)
+  fragile                Boolean      @default(false)
+  archival               Boolean      @default(false)
+  doNotRemoveFromLibrary Boolean      @default(false)
+  rareProtected          Boolean      @default(false)
+  loanDaysDefault        Int          @default(21)
+  loanDaysRare           Int          @default(7)
+  requiresRareApproval   Boolean      @default(false)
+  botanicalGenera        String[]     @default([])
+  tags                   String[]     @default([])
   notes                  String?
   acquisitionNotes       String?
-  createdAt              DateTime    @default(now())
-  updatedAt              DateTime    @updatedAt
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
 
-  category    Category?    @relation(fields: [categoryId], references: [id])
-  branch      Branch?      @relation(fields: [branchId], references: [id])
-  authors     ItemAuthor[]
-  copies      ItemCopy[]
-  attachments Attachment[]
+  category     Category?     @relation(fields: [categoryId], references: [id])
+  branch       Branch?       @relation(fields: [branchId], references: [id])
+  authors      ItemAuthor[]
+  copies       ItemCopy[]
+  attachments  Attachment[]
   reservations Reservation[]
 }
 
 model ItemCopy {
-  id               String    @id @default(cuid())
-  itemId           String
-  copyNumber       Int       @default(1)
-  barcode          String?   @unique
-  shelfLocationId  String?
-  conditionNotes   String?
-  damaged          Boolean   @default(false)
-  missing          Boolean   @default(false)
-  donorId          String?
-  acquisitionDate  DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  itemId          String
+  copyNumber      Int       @default(1)
+  barcode         String?   @unique
+  shelfLocationId String?
+  conditionNotes  String?
+  damaged         Boolean   @default(false)
+  missing         Boolean   @default(false)
+  donorId         String?
+  acquisitionDate DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  item           Item                   @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  shelfLocation  ShelfLocation?         @relation(fields: [shelfLocationId], references: [id])
-  donor          Donor?                 @relation(fields: [donorId], references: [id])
-  loans          Loan[]
-  conditionLog   ItemConditionHistory[]
-  attachments    Attachment[]
+  item          Item                   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  shelfLocation ShelfLocation?         @relation(fields: [shelfLocationId], references: [id])
+  donor         Donor?                 @relation(fields: [donorId], references: [id])
+  loans         Loan[]
+  conditionLog  ItemConditionHistory[]
+  attachments   Attachment[]
 }
 
 model Loan {
-  id                     String    @id @default(cuid())
+  id                     String     @id @default(cuid())
   memberProfileId        String
   itemCopyId             String
-  checkedOutAt           DateTime  @default(now())
+  checkedOutAt           DateTime   @default(now())
   dueDate                DateTime
   returnedAt             DateTime?
   status                 LoanStatus @default(ACTIVE)
-  renewalCount           Int       @default(0)
-  maxRenewals            Int       @default(2)
+  renewalCount           Int        @default(0)
+  maxRenewals            Int        @default(2)
   approvedByUserId       String?
   dueDateAcknowledgedAt  DateTime?
   notes                  String?
@@ -303,14 +311,18 @@ model Loan {
   memberProfile MemberProfile @relation(fields: [memberProfileId], references: [id], onDelete: Cascade)
   itemCopy      ItemCopy      @relation(fields: [itemCopyId], references: [id], onDelete: Cascade)
   approvedBy    User?         @relation("LoanApprover", fields: [approvedByUserId], references: [id])
+
+  @@index([itemCopyId, status])
+  @@index([memberProfileId, status])
+  @@index([dueDate, status])
 }
 
 model Reservation {
-  id              String             @id @default(cuid())
+  id              String            @id @default(cuid())
   memberProfileId String
   itemId          String
-  status          ReservationStatus  @default(WAITING)
-  createdAt       DateTime           @default(now())
+  status          ReservationStatus @default(WAITING)
+  createdAt       DateTime          @default(now())
   notifiedAt      DateTime?
 
   memberProfile MemberProfile @relation(fields: [memberProfileId], references: [id], onDelete: Cascade)
@@ -320,15 +332,15 @@ model Reservation {
 }
 
 model ItemConditionHistory {
-  id          String   @id @default(cuid())
-  itemCopyId  String
-  condition   String
-  notes       String?
+  id           String   @id @default(cuid())
+  itemCopyId   String
+  condition    String
+  notes        String?
   recordedById String?
-  createdAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
 
   itemCopy   ItemCopy @relation(fields: [itemCopyId], references: [id], onDelete: Cascade)
-  recordedBy User? @relation(fields: [recordedById], references: [id])
+  recordedBy User?    @relation(fields: [recordedById], references: [id])
 }
 
 model Attachment {
@@ -370,4 +382,23 @@ model Notification {
   createdAt DateTime         @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ImportBatch {
+  id            String            @id @default(cuid())
+  filename      String
+  fileHash      String
+  status        ImportBatchStatus @default(COMPLETED)
+  totalRows     Int               @default(0)
+  createdCount  Int               @default(0)
+  skippedCount  Int               @default(0)
+  rejectedCount Int               @default(0)
+  errorSummary  Json?
+  createdById   String?
+  createdAt     DateTime          @default(now())
+
+  createdBy User? @relation(fields: [createdById], references: [id])
+
+  @@index([fileHash])
+  @@index([createdAt])
 }

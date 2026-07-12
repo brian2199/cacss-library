@@ -2,6 +2,7 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { ItemFormat } from "@prisma/client";
 import { digitsOnly, extractIsbnCandidates } from "@/lib/barcode";
+import { sanitizeImportCell } from "@/lib/csv-sanitize";
 
 export type ParsedImportRow = {
   rowNumber: number;
@@ -29,7 +30,7 @@ export type SpreadsheetParseResult = {
 function pick(raw: Record<string, string>, keys: string[]): string {
   for (const key of keys) {
     const v = raw[key];
-    if (v !== undefined && String(v).trim()) return String(v).trim();
+    if (v !== undefined && sanitizeImportCell(v)) return sanitizeImportCell(v);
   }
   return "";
 }
@@ -169,6 +170,10 @@ export function parseSpreadsheetBuffer(
 
   return { filename, sheetName, headers, rows: parsed, skippedEmpty };
 }
+
+export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+export const ALLOWED_IMPORT_EXTENSIONS = [".csv", ".xlsx", ".xls"] as const;
 
 export const IMPORT_TEMPLATE_CSV = `title,author,year,isbn,upc,barcode,format,publisher,notes,copy
 Example Cactus Field Guide,Jane Botanist,2018,9781234567890,9781234567890,9781234567890,BOOK,Desert Press,Optional shelf note,1

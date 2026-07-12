@@ -1,6 +1,8 @@
 import { requireRole } from "@/lib/authz";
-import { listDeskMembers } from "@/actions/checkout-desk";
 import CheckoutDeskClient from "./checkout-desk-client";
+import { listDeskMembers } from "@/actions/checkout-desk";
+
+export const dynamic = "force-dynamic";
 
 export default async function CheckoutPage({
   searchParams,
@@ -8,9 +10,9 @@ export default async function CheckoutPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   await requireRole(["LIBRARIAN", "ADMIN"]);
-  const sp = await searchParams;
   const members = await listDeskMembers();
-  const initialTab = sp.tab === "return" ? "return" : "checkout";
+  const params = await searchParams;
+  const initialTab = params.tab === "return" ? "return" : "checkout";
 
   return <CheckoutDeskClient members={members} initialTab={initialTab} />;
 }

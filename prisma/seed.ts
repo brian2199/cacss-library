@@ -8,10 +8,18 @@ import {
   Prisma,
 } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
+import { isProduction } from "../src/lib/env";
 
 const DEMO_PASSWORD = "cacss-demo";
 
 async function main() {
+  if (isProduction() && process.env.ALLOW_DEMO_SEED !== "true") {
+    console.error(
+      "Refusing to run destructive demo seed in production. Set ALLOW_DEMO_SEED=true to override.",
+    );
+    process.exit(1);
+  }
+
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
 
   await prisma.auditLog.deleteMany();

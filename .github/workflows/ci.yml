@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main, improve/**, cursor/**]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Prisma validate
+        run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cacss?schema=public
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - name: Production build
+        run: npm run build
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cacss?schema=public
+          AUTH_SECRET: ci-build-secret-min-32-chars-long!!
+
+      - name: OpenNext build
+        run: npx opennextjs-cloudflare build
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cacss?schema=public
+          AUTH_SECRET: ci-build-secret-min-32-chars-long!!

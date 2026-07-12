@@ -37,7 +37,6 @@ export function CacssLogo({
         className={cn(
           "w-auto object-contain",
           sizeClasses[size],
-          "dark:brightness-0 dark:invert",
         )}
       />
       {showLibraryLabel || tagline ? (

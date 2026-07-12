@@ -4,13 +4,12 @@ Modern library operations console for the **Central Arizona Cactus & Succulent S
 
 ## Stack
 
-- **Next.js 15** (App Router) + **TypeScript**
+- **Next.js 15** (App Router) + **TypeScript** + **Node 22+**
 - **TailwindCSS** + **shadcn/ui-inspired** primitives (Sonoran desert palette, dark mode via `next-themes`)
 - **Prisma ORM** + **PostgreSQL**
 - **Auth.js / NextAuth v5** (credentials provider + JWT sessions)
-- **TanStack Query** for client caching utilities
-- **Recharts** reporting
-- **CSV / Excel / PDF text preview** import pathways (PDF OCR flagged as a future phase)
+- **OpenNext / Cloudflare Workers** production deployment
+- **Vitest** unit tests for circulation and barcode logic
 
 ## Quick start (local)
 
@@ -27,7 +26,7 @@ npm run db:seed             # prisma db seed
 npm run dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001). Demo credentials (after seed):
+Open [http://localhost:3001](http://localhost:3001). Demo credentials (**development seed only** — see [docs/local-development.md](docs/local-development.md)):
 
 **Windows:** generate `AUTH_SECRET` with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. If Postgres on port 5432 is already in use, keep `docker-compose.yml` db mapping at `5433:5432` and set `DATABASE_URL` to `localhost:5433` as in `.env.example`.
 
@@ -53,7 +52,7 @@ This app can deploy to Cloudflare Workers via [OpenNext](https://opennext.js.org
 **You need:**
 
 1. A Cloudflare account + [API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/) (`Workers Scripts: Edit`)
-2. A hosted PostgreSQL database (e.g. [Neon](https://neon.tech) free tier) — run `npx prisma migrate deploy` and `npm run db:seed` against it once
+2. A hosted PostgreSQL database (e.g. [Neon](https://neon.tech) free tier) — run `npx prisma migrate deploy` (do **not** run demo seed in production)
 3. Secrets: `DATABASE_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST=true`
 
 **Deploy from your machine:**
@@ -101,11 +100,15 @@ Use the included `Dockerfile` or a Node buildpack:
 
 ## Architecture highlights
 
-- **Public catalog** (`/catalog`) — fine-grained filters (genus, rarity, signed, decade, missing copies, reference-only, youth shelf).
-- **Rare protections** — shorter loan timers, admin approval queue (`/approvals`), acknowledgement tracking, visual badges.
-- **Imports** — CSV/Excel with preview, UPC/EAN columns, flexible headers, and duplicate detection on ISBN, barcode, or title+year; optional Open Library enrichment when ISBN/year is missing.
-- **Scan desk + QR labels** — `/scan` resolves UPC/ISBN against your catalog, looks up title metadata (Open Library + Google Books), and adds new items in one step; `/labels` prints authenticated PNG QR tiles.
-- **Audit trail** — `AuditLog` captures circulation + imports (expand with middleware hooks as needed).
+- **Checkout desk** (`/checkout`) — multi-book basket, member search, quick add member, idempotent returns
+- **Public catalog** (`/catalog`) — member-friendly browse; advanced filters for staff
+- **Member account** (`/account`) — own loans and profile
+- **Rare protections** — shorter loan timers, admin approval queue (`/approvals`)
+- **Imports** — CSV/Excel preview, batch tracking, duplicate detection, CSV injection protection
+- **Scan desk** (`/scan`) — UPC/ISBN lookup (Open Library + Google Books)
+- **Staff dashboard** — overdue loans, quick actions, import history
+
+See [docs/](docs/) for detailed guides.
 
 ## AI-ready hooks (future)
 
@@ -124,10 +127,13 @@ Fully scanned image PDFs will need an OCR pass — architect that as a worker se
 
 | Script | Purpose |
 | --- | --- |
-| `npm run dev` | Turbopack dev server |
+| `npm run dev` | Turbopack dev server on **port 3001** |
 | `npm run build` / `npm run start` | Production bundle |
+| `npm test` | Vitest unit tests |
+| `npm run typecheck` | TypeScript check |
+| `npm run deploy` | OpenNext build + Cloudflare deploy |
 | `npm run db:migrate` | Prisma migrate dev |
-| `npm run db:seed` | Loads desert-themed demo inventory |
+| `npm run db:seed` | Demo data (**dev only**) |
 
 ## License
 

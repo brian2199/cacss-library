@@ -5,16 +5,20 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { auditLog } from "@/lib/audit";
+import {
+  checkoutCopiesTransaction,
+  returnCopyByBarcodeTransaction,
+} from "@/lib/circulation";
 
 function invalidateLoanViews(itemId: string) {
   revalidatePath("/dashboard");
+  revalidatePath("/checkout");
   revalidatePath("/loans");
   revalidatePath("/approvals");
   revalidatePath("/catalog");
+  revalidatePath("/account");
   revalidatePath(`/catalog/${itemId}`);
 }
-
-const MAX_ACTIVE_LOANS_MEMBER = 7;
 
 async function requireStaff() {
   const session = await auth();
@@ -40,61 +44,60 @@ export async function checkoutCopy(params: {
   memberProfileId: string;
 }) {
   const session = await requireStaff();
+  const { loanIds } = await checkoutCopiesTransaction({
+    itemCopyIds: [params.itemCopyId],
+    memberProfileId: params.memberProfileId,
+    approvedByUserId: session.user.id,
+  });
 
   const copy = await prisma.itemCopy.findUnique({
     where: { id: params.itemCopyId },
-    include: {
-      item: true,
-      loans: { where: { status: { in: ["ACTIVE", "PENDING_RARE_APPROVAL"] } } },
-    },
-  });
-  if (!copy) throw new Error("Copy not found.");
-  if (copy.missing) throw new Error("Cannot circulate a missing copy.");
-  if (copy.loans.length > 0) throw new Error("Copy already on loan or pending.");
-
-  const item = copy.item;
-  if (item.referenceOnly || !item.checkoutEligible) {
-    throw new Error("This title is reference-only and cannot leave the room.");
-  }
-
-  const activeCount = await prisma.loan.count({
-    where: {
-      memberProfileId: params.memberProfileId,
-      status: { in: ["ACTIVE", "PENDING_RARE_APPROVAL"] },
-    },
-  });
-  if (activeCount >= MAX_ACTIVE_LOANS_MEMBER) {
-    throw new Error("Member has reached the checkout limit.");
-  }
-
-  const needsRare = item.requiresRareApproval || item.rareProtected;
-  const loanDays = needsRare ? item.loanDaysRare : item.loanDaysDefault;
-  const status = needsRare ? "PENDING_RARE_APPROVAL" : "ACTIVE";
-
-  const loan = await prisma.loan.create({
-    data: {
-      memberProfileId: params.memberProfileId,
-      itemCopyId: copy.id,
-      dueDate: addDays(new Date(), loanDays),
-      status,
-      approvedByUserId: needsRare ? null : session.user.id,
-      dueDateAcknowledgedAt: needsRare ? null : new Date(),
-    },
+    include: { item: true },
   });
 
   await auditLog({
     actorId: session.user.id,
     action: "CHECKOUT",
     entityType: "Loan",
-    entityId: loan.id,
-    summary: needsRare
-      ? `Rare checkout requested for ${item.title}`
-      : `Checked out ${item.title}`,
-    payload: { copyId: copy.id, memberProfileId: params.memberProfileId },
+    entityId: loanIds[0],
+    summary: copy ? `Checked out ${copy.item.title}` : "Checked out copy",
+    payload: { copyId: params.itemCopyId, memberProfileId: params.memberProfileId },
   });
 
-  invalidateLoanViews(copy.item.id);
-  return loan.id;
+  if (copy) invalidateLoanViews(copy.item.id);
+  return loanIds[0]!;
+}
+
+export async function checkoutMultipleCopies(params: {
+  itemCopyIds: string[];
+  memberProfileId: string;
+}) {
+  const session = await requireStaff();
+  const { loanIds, titles } = await checkoutCopiesTransaction({
+    itemCopyIds: params.itemCopyIds,
+    memberProfileId: params.memberProfileId,
+    approvedByUserId: session.user.id,
+  });
+
+  await auditLog({
+    actorId: session.user.id,
+    action: "CHECKOUT",
+    entityType: "Loan",
+    summary: `Checked out ${titles.length} item(s): ${titles.slice(0, 3).join("; ")}${titles.length > 3 ? "…" : ""}`,
+    payload: {
+      loanIds,
+      memberProfileId: params.memberProfileId,
+      count: titles.length,
+    },
+  });
+
+  const copies = await prisma.itemCopy.findMany({
+    where: { id: { in: params.itemCopyIds } },
+    select: { itemId: true },
+  });
+  for (const c of copies) invalidateLoanViews(c.itemId);
+
+  return { loanIds, count: loanIds.length, titles };
 }
 
 export async function approveRareLoan(loanId: string) {
@@ -193,6 +196,40 @@ export async function returnLoan(loanId: string, damageNote?: string) {
   invalidateLoanViews(loan.itemCopy.item.id);
 }
 
+export async function returnLoanByBarcode(barcode: string, damageNote?: string) {
+  const session = await requireStaff();
+  const result = await returnCopyByBarcodeTransaction(
+    barcode,
+    session.user.id,
+    damageNote,
+  );
+
+  if (result.status === "no_loan") throw new Error(result.message);
+  if (result.status === "already_returned") {
+    return { alreadyReturned: true as const, title: result.title, message: result.message };
+  }
+
+  await auditLog({
+    actorId: session.user.id,
+    action: "RETURN",
+    entityType: "Loan",
+    entityId: result.loanId,
+    summary: `Returned ${result.title}`,
+  });
+
+  const copy = await prisma.itemCopy.findFirst({
+    where: { barcode: { equals: barcode, mode: "insensitive" } },
+    include: { item: true },
+  });
+  if (copy) invalidateLoanViews(copy.item.id);
+
+  return {
+    alreadyReturned: false as const,
+    title: result.title,
+    borrower: result.borrower,
+  };
+}
+
 export async function renewLoan(loanId: string) {
   const session = await requireStaff();
   const loan = await prisma.loan.findUnique({
@@ -238,5 +275,6 @@ export async function acknowledgeDueDate(loanId: string) {
   });
 
   revalidatePath("/loans");
+  revalidatePath("/account");
   revalidatePath("/dashboard");
 }

@@ -29,7 +29,9 @@ export async function middleware(req: NextRequest) {
   }
 
   if (isLoggedIn && pathname === "/login") {
-    return NextResponse.redirect(new URL("/dashboard", req.nextUrl.origin));
+    const role = token?.role as string | undefined;
+    const dest = role === "MEMBER" ? "/catalog" : "/dashboard";
+    return NextResponse.redirect(new URL(dest, req.nextUrl.origin));
   }
 
   return NextResponse.next();

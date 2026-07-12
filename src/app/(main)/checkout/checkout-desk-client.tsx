@@ -5,15 +5,18 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   createDeskMember,
-  deskCheckout,
+  deskCheckoutBasket,
   deskReturnByBarcode,
   resolveForCheckout,
   searchBooksForCheckout,
+  searchDeskMembers,
   selectItemForCheckout,
+  type BasketItem,
   type BookSearchHit,
   type DeskMember,
   type ResolveForCheckoutResult,
 } from "@/actions/checkout-desk";
+import { scanDedupeKey } from "@/lib/barcode";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -34,6 +37,12 @@ const Scanner = dynamic(() => import("@/components/html5-barcode-scanner"), {
   loading: () => <p className="text-sm text-muted-foreground">Loading camera…</p>,
 });
 
+type CheckoutConfirmation = {
+  memberLabel: string;
+  titles: string[];
+  count: number;
+};
+
 export default function CheckoutDeskClient({
   members: initialMembers,
   initialTab = "checkout",
@@ -49,48 +58,110 @@ export default function CheckoutDeskClient({
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newPhone, setNewPhone] = useState("");
-  const [bookMode, setBookMode] = useState<"scan" | "search">("search");
+  const [bookMode, setBookMode] = useState<"scan" | "search">("scan");
   const [titleSearch, setTitleSearch] = useState("");
   const [searchHits, setSearchHits] = useState<BookSearchHit[]>([]);
   const [bookCode, setBookCode] = useState("");
   const [returnCode, setReturnCode] = useState("");
   const [resolved, setResolved] = useState<ResolveForCheckoutResult | null>(null);
   const [selectedCopyId, setSelectedCopyId] = useState("");
+  const [basket, setBasket] = useState<BasketItem[]>([]);
+  const [confirmation, setConfirmation] = useState<CheckoutConfirmation | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scanFlash, setScanFlash] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const wedgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastScanKey = useRef<{ key: string; at: number } | null>(null);
+  const bookInputRef = useRef<HTMLInputElement>(null);
 
   const filteredMembers = members.filter((m) => {
     const q = memberSearch.trim().toLowerCase();
     if (!q) return true;
     return (
-      m.label.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)
+      m.label.toLowerCase().includes(q) ||
+      m.email.toLowerCase().includes(q) ||
+      (m.phone?.toLowerCase().includes(q) ?? false)
     );
   });
 
   const selectedMember = members.find((m) => m.id === memberId);
 
-  const runResolve = useCallback((code: string) => {
-    const trimmed = code.trim();
-    if (!trimmed) return;
-    setError(null);
-    setMessage(null);
-    setResolved(null);
-    start(async () => {
-      try {
-        const res = await resolveForCheckout(trimmed);
-        setResolved(res);
-        if (res.status === "ready" && res.copies.length === 1) {
-          setSelectedCopyId(res.copies[0]!.copyId);
-        } else {
-          setSelectedCopyId("");
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Lookup failed.");
+  const flashScan = (label: string) => {
+    setScanFlash(label);
+    window.setTimeout(() => setScanFlash(null), 800);
+  };
+
+  const isDuplicateScan = (code: string): boolean => {
+    const key = scanDedupeKey(code);
+    const now = Date.now();
+    if (lastScanKey.current?.key === key && now - lastScanKey.current.at < 1500) {
+      return true;
+    }
+    lastScanKey.current = { key, at: now };
+    return false;
+  };
+
+  const addToBasket = useCallback((item: BasketItem) => {
+    setBasket((prev) => {
+      if (prev.some((b) => b.copyId === item.copyId)) {
+        setError("That copy is already in the basket.");
+        return prev;
       }
+      setError(null);
+      flashScan(`Added: ${item.title}`);
+      return [...prev, item];
     });
   }, []);
+
+  const removeFromBasket = (copyId: string) => {
+    setBasket((prev) => prev.filter((b) => b.copyId !== copyId));
+  };
+
+  const applyReadyResult = (res: Extract<ResolveForCheckoutResult, { status: "ready" }>) => {
+    if (res.copies.length === 1) {
+      const c = res.copies[0]!;
+      addToBasket({
+        copyId: c.copyId,
+        copyNumber: c.copyNumber,
+        barcode: c.barcode,
+        title: res.title,
+        authors: res.authors,
+        shelfHint: c.shelfHint,
+        isSpecial: res.isSpecial,
+      });
+      setResolved(null);
+      setBookCode("");
+      bookInputRef.current?.focus();
+      return;
+    }
+    setResolved(res);
+    setSelectedCopyId("");
+  };
+
+  const runResolve = useCallback(
+    (code: string) => {
+      const trimmed = code.trim();
+      if (!trimmed) return;
+      if (isDuplicateScan(trimmed)) return;
+
+      setError(null);
+      setMessage(null);
+      start(async () => {
+        try {
+          const res = await resolveForCheckout(trimmed);
+          if (res.status === "ready") {
+            applyReadyResult(res);
+          } else {
+            setResolved(res);
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Lookup failed.");
+        }
+      });
+    },
+    [addToBasket],
+  );
 
   const handleBookInput = (value: string) => {
     setBookCode(value);
@@ -100,25 +171,59 @@ export default function CheckoutDeskClient({
     }, 120);
   };
 
-  const handleCheckout = () => {
+  const addResolvedCopyToBasket = () => {
+    if (resolved?.status !== "ready" || !selectedCopyId) {
+      setError("Select a copy to add.");
+      return;
+    }
+    const copy = resolved.copies.find((c) => c.copyId === selectedCopyId);
+    if (!copy) return;
+    addToBasket({
+      copyId: copy.copyId,
+      copyNumber: copy.copyNumber,
+      barcode: copy.barcode,
+      title: resolved.title,
+      authors: resolved.authors,
+      shelfHint: copy.shelfHint,
+      isSpecial: resolved.isSpecial,
+    });
+    setResolved(null);
+    setSelectedCopyId("");
+    setBookCode("");
+    bookInputRef.current?.focus();
+  };
+
+  const handleCompleteCheckout = () => {
     if (!memberId) {
       setError("Select a member first.");
       return;
     }
-    if (!selectedCopyId) {
-      setError("Select a copy to check out.");
+    if (!basket.length) {
+      setError("Add at least one book to the basket.");
       return;
     }
     start(async () => {
       try {
-        const res = await deskCheckout({
-          itemCopyId: selectedCopyId,
+        const res = await deskCheckoutBasket({
+          itemCopyIds: basket.map((b) => b.copyId),
           memberProfileId: memberId,
         });
-        setMessage(res.message);
-        setBookCode("");
+        setConfirmation({
+          memberLabel: selectedMember?.label ?? "Member",
+          titles: res.titles,
+          count: res.count,
+        });
+        setBasket([]);
         setResolved(null);
-        setSelectedCopyId("");
+        setMessage(res.message);
+        setError(null);
+        setMembers((prev) =>
+          prev.map((m) =>
+            m.id === memberId
+              ? { ...m, activeLoans: m.activeLoans + res.count }
+              : m,
+          ),
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : "Checkout failed.");
       }
@@ -152,13 +257,12 @@ export default function CheckoutDeskClient({
     start(async () => {
       try {
         const res = await selectItemForCheckout(hit.itemId);
-        setResolved(res);
-        setBookCode("");
-        if (res.status === "ready" && res.copies.length === 1) {
-          setSelectedCopyId(res.copies[0]!.copyId);
+        if (res.status === "ready") {
+          applyReadyResult(res);
         } else {
-          setSelectedCopyId("");
+          setResolved(res);
         }
+        setBookCode("");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not load item.");
       }
@@ -174,16 +278,24 @@ export default function CheckoutDeskClient({
           phone: newPhone || undefined,
         });
         setMembers((prev) =>
-          [...prev, created].sort((a, b) => a.label.localeCompare(b.label)),
+          [...prev, created.member].sort((a, b) => a.label.localeCompare(b.label)),
         );
-        setMemberId(created.id);
+        setMemberId(created.member.id);
         setNewName("");
         setNewEmail("");
         setNewPhone("");
         setShowAddMember(false);
-        setMessage(
-          `Added ${created.label}. They can sign in with ${created.email} and temporary password cacss-demo.`,
-        );
+        if (created.temporaryPassword) {
+          setMessage(
+            `Added ${created.member.label}. One-time password (share securely): ${created.temporaryPassword}`,
+          );
+        } else if (created.devPasswordHint) {
+          setMessage(
+            `Added ${created.member.label}. Development login uses the shared demo password documented in README.`,
+          );
+        } else {
+          setMessage(`Added ${created.member.label}.`);
+        }
         setError(null);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not add member.");
@@ -192,16 +304,49 @@ export default function CheckoutDeskClient({
   };
 
   const handleReturn = () => {
+    const code = returnCode.trim();
+    if (!code) return;
+    if (isDuplicateScan(code)) return;
+
     start(async () => {
       try {
-        const res = await deskReturnByBarcode(returnCode);
-        setMessage(`Returned “${res.title}” from ${res.borrower}.`);
+        const res = await deskReturnByBarcode(code);
+        if (res.alreadyReturned) {
+          setMessage(res.message ?? `“${res.title}” was already returned.`);
+        } else {
+          setMessage(res.message ?? `Returned “${res.title}”.`);
+          flashScan(`Returned: ${res.title}`);
+        }
         setReturnCode("");
         setError(null);
+        bookInputRef.current?.focus();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Return failed.");
       }
     });
+  };
+
+  const refreshMemberSearch = () => {
+    const q = memberSearch.trim();
+    if (q.length < 2) return;
+    start(async () => {
+      try {
+        const results = await searchDeskMembers(q);
+        if (results.length) setMembers(results);
+      } catch {
+        /* keep local filter */
+      }
+    });
+  };
+
+  const startNewSession = () => {
+    setBasket([]);
+    setConfirmation(null);
+    setMessage(null);
+    setError(null);
+    setResolved(null);
+    setBookCode("");
+    bookInputRef.current?.focus();
   };
 
   return (
@@ -214,10 +359,20 @@ export default function CheckoutDeskClient({
           Check out & return
         </h1>
         <p className="mt-2 max-w-3xl text-muted-foreground">
-          Pick the member, then find the book by title or scan its barcode. Most loans are standard —
-          rare titles may need admin approval after checkout.
+          Select a member, scan or search books into the basket, then complete checkout once.
+          Returns are idempotent — scanning an already-returned copy shows a friendly notice.
         </p>
       </div>
+
+      {scanFlash ? (
+        <div
+          className="rounded-lg border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary"
+          role="status"
+          aria-live="polite"
+        >
+          {scanFlash}
+        </div>
+      ) : null}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as "checkout" | "return")}>
         <TabsList className="grid w-full max-w-md grid-cols-2">
@@ -226,6 +381,41 @@ export default function CheckoutDeskClient({
         </TabsList>
 
         <TabsContent value="checkout" className="mt-6 space-y-6">
+          {confirmation ? (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader>
+                <CardTitle>Checkout complete</CardTitle>
+                <CardDescription>
+                  {confirmation.count} item{confirmation.count === 1 ? "" : "s"} checked out to{" "}
+                  {confirmation.memberLabel}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <ul className="list-inside list-disc text-sm">
+                  {confirmation.titles.map((t) => (
+                    <li key={t}>{t}</li>
+                  ))}
+                </ul>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" onClick={startNewSession}>
+                    Check out more
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setConfirmation(null);
+                      setMemberId("");
+                      setBasket([]);
+                    }}
+                  >
+                    New member / session
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle>1. Member</CardTitle>
@@ -233,21 +423,24 @@ export default function CheckoutDeskClient({
             </CardHeader>
             <CardContent className="space-y-4">
               <Input
-                placeholder="Search name or email…"
+                placeholder="Search name, email, or phone…"
                 value={memberSearch}
                 onChange={(e) => setMemberSearch(e.target.value)}
+                onBlur={refreshMemberSearch}
+                onKeyDown={(e) => e.key === "Enter" && refreshMemberSearch()}
               />
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Borrower</Label>
+                  <Label htmlFor="borrower-select">Borrower</Label>
                   <Select value={memberId} onValueChange={setMemberId}>
-                    <SelectTrigger className="h-11">
+                    <SelectTrigger id="borrower-select" className="h-11">
                       <SelectValue placeholder="Select member" />
                     </SelectTrigger>
                     <SelectContent>
                       {filteredMembers.map((m) => (
                         <SelectItem key={m.id} value={m.id}>
-                          {m.label} ({m.activeLoans} out)
+                          {m.label} ({m.activeLoans} out
+                          {m.overdueLoans ? `, ${m.overdueLoans} overdue` : ""})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -257,9 +450,14 @@ export default function CheckoutDeskClient({
                   <div className="rounded-lg border bg-muted/40 p-4 text-sm">
                     <p className="font-medium">{selectedMember.label}</p>
                     <p className="text-muted-foreground">{selectedMember.email}</p>
+                    {selectedMember.phone ? (
+                      <p className="text-muted-foreground">{selectedMember.phone}</p>
+                    ) : null}
                     <p className="mt-1 text-muted-foreground">
-                      {selectedMember.activeLoans} book
-                      {selectedMember.activeLoans === 1 ? "" : "s"} currently out
+                      {selectedMember.activeLoans} out
+                      {selectedMember.overdueLoans
+                        ? ` · ${selectedMember.overdueLoans} overdue`
+                        : ""}
                     </p>
                   </div>
                 ) : null}
@@ -297,10 +495,6 @@ export default function CheckoutDeskClient({
                         />
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Temporary password: <code className="rounded bg-muted px-1">cacss-demo</code> —
-                      ask them to change it after first login.
-                    </p>
                     <div className="flex flex-wrap gap-2">
                       <Button
                         type="button"
@@ -334,8 +528,8 @@ export default function CheckoutDeskClient({
 
           <Card>
             <CardHeader>
-              <CardTitle>2. Book</CardTitle>
-              <CardDescription>Search by title or author, or scan a barcode</CardDescription>
+              <CardTitle>2. Add books</CardTitle>
+              <CardDescription>Scan barcodes or search by title — items go into the basket</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <Tabs
@@ -343,9 +537,41 @@ export default function CheckoutDeskClient({
                 onValueChange={(v) => setBookMode(v as "scan" | "search")}
               >
                 <TabsList>
-                  <TabsTrigger value="search">Search by name</TabsTrigger>
                   <TabsTrigger value="scan">Scan barcode</TabsTrigger>
+                  <TabsTrigger value="search">Search by name</TabsTrigger>
                 </TabsList>
+                <TabsContent value="scan" className="mt-4 space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    <Input
+                      ref={bookInputRef}
+                      className="max-w-md font-mono"
+                      placeholder="Scan book barcode…"
+                      value={bookCode}
+                      onChange={(e) => handleBookInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          runResolve(bookCode);
+                        }
+                      }}
+                      autoComplete="off"
+                      aria-label="Book barcode"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() => runResolve(bookCode)}
+                      disabled={pending}
+                    >
+                      {pending ? "Looking…" : "Find book"}
+                    </Button>
+                  </div>
+                  <Scanner
+                    onDetected={(code) => {
+                      setBookCode(code);
+                      runResolve(code);
+                    }}
+                  />
+                </TabsContent>
                 <TabsContent value="search" className="mt-4 space-y-4">
                   <div className="flex flex-wrap gap-2">
                     <Input
@@ -354,7 +580,6 @@ export default function CheckoutDeskClient({
                       value={titleSearch}
                       onChange={(e) => setTitleSearch(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && runTitleSearch()}
-                      autoFocus
                     />
                     <Button type="button" onClick={runTitleSearch} disabled={pending}>
                       {pending ? "Searching…" : "Search"}
@@ -390,79 +615,33 @@ export default function CheckoutDeskClient({
                     </ul>
                   ) : null}
                 </TabsContent>
-                <TabsContent value="scan" className="mt-4 space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    <Input
-                      className="max-w-md font-mono"
-                      placeholder="Scan book barcode…"
-                      value={bookCode}
-                      onChange={(e) => handleBookInput(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && runResolve(bookCode)}
-                    />
-                    <Button type="button" onClick={() => runResolve(bookCode)} disabled={pending}>
-                      {pending ? "Looking…" : "Find book"}
-                    </Button>
-                  </div>
-                  <Scanner
-                    onDetected={(code) => {
-                      setBookCode(code);
-                      runResolve(code);
-                    }}
-                  />
-                </TabsContent>
               </Tabs>
             </CardContent>
           </Card>
 
-          {resolved?.status === "ready" ? (
+          {resolved?.status === "ready" && resolved.copies.length > 1 ? (
             <Card className="border-primary/30">
               <CardHeader>
                 <CardTitle className="text-xl">{resolved.title}</CardTitle>
-                <CardDescription>{resolved.authors}</CardDescription>
-                {resolved.isSpecial ? (
-                  <Badge variant="bloom" className="w-fit">
-                    Special handling — review due date & rules
-                  </Badge>
-                ) : null}
+                <CardDescription>{resolved.authors} — pick a copy</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {resolved.copies.length > 1 ? (
-                  <div className="space-y-2">
-                    <Label>Which copy?</Label>
-                    <Select value={selectedCopyId} onValueChange={setSelectedCopyId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select copy" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {resolved.copies.map((c) => (
-                          <SelectItem key={c.copyId} value={c.copyId}>
-                            Copy #{c.copyNumber}
-                            {c.barcode ? ` · ${c.barcode}` : ""}
-                            {c.shelfHint ? ` · ${c.shelfHint}` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Copy #{resolved.copies[0]?.copyNumber}
-                    {resolved.copies[0]?.barcode
-                      ? ` · ${resolved.copies[0].barcode}`
-                      : ""}
-                  </p>
-                )}
-                <Button
-                  type="button"
-                  size="lg"
-                  className="w-full sm:w-auto"
-                  onClick={handleCheckout}
-                  disabled={pending || !memberId}
-                >
-                  {pending ? "Checking out…" : "Check out to member"}
-                </Button>
-                <Button variant="link" asChild className="px-0">
-                  <Link href={`/catalog/${resolved.itemId}`}>View full record</Link>
+                <Select value={selectedCopyId} onValueChange={setSelectedCopyId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select copy" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {resolved.copies.map((c) => (
+                      <SelectItem key={c.copyId} value={c.copyId}>
+                        Copy #{c.copyNumber}
+                        {c.barcode ? ` · ${c.barcode}` : ""}
+                        {c.shelfHint ? ` · ${c.shelfHint}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button type="button" onClick={addResolvedCopyToBasket} disabled={!selectedCopyId}>
+                  Add to basket
                 </Button>
               </CardContent>
             </Card>
@@ -489,38 +668,80 @@ export default function CheckoutDeskClient({
             </Alert>
           ) : null}
 
-          {resolved?.status === "unavailable" ? (
+          {resolved?.status === "unavailable" || resolved?.status === "not_found" ? (
             <Alert variant="destructive">
-              <AlertTitle>Cannot check out</AlertTitle>
+              <AlertTitle>
+                {resolved.status === "not_found" ? "Not found" : "Cannot check out"}
+              </AlertTitle>
               <AlertDescription>
-                <strong>{resolved.title}</strong> — {resolved.reason}
+                {resolved.status === "not_found" ? resolved.message : `${resolved.title} — ${resolved.reason}`}
               </AlertDescription>
             </Alert>
           ) : null}
 
-          {resolved?.status === "not_found" ? (
-            <Alert variant="destructive">
-              <AlertTitle>Not found</AlertTitle>
-              <AlertDescription className="space-y-2">
-                <p>{resolved.message}</p>
-                <p className="flex flex-wrap gap-3 text-sm">
-                  <Link href="/scan" className="font-medium text-primary underline-offset-4 hover:underline">
-                    Add via scan
-                  </Link>
-                  <Link href="/imports" className="font-medium text-primary underline-offset-4 hover:underline">
-                    Import spreadsheet
-                  </Link>
+          <Card>
+            <CardHeader>
+              <CardTitle>3. Basket ({basket.length})</CardTitle>
+              <CardDescription>Review before completing checkout</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {basket.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Scan or search to add books. The basket stays until you complete checkout.
                 </p>
-              </AlertDescription>
-            </Alert>
-          ) : null}
+              ) : (
+                <ul className="divide-y rounded-lg border">
+                  {basket.map((item) => (
+                    <li
+                      key={item.copyId}
+                      className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="font-medium">{item.title}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {item.authors} · Copy #{item.copyNumber}
+                          {item.barcode ? ` · ${item.barcode}` : ""}
+                        </p>
+                        {item.isSpecial ? (
+                          <Badge variant="bloom" className="mt-1">
+                            Special handling
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => removeFromBasket(item.copyId)}
+                      >
+                        Remove
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Button
+                type="button"
+                size="lg"
+                className="w-full sm:w-auto"
+                onClick={handleCompleteCheckout}
+                disabled={pending || !memberId || basket.length === 0}
+              >
+                {pending
+                  ? "Checking out…"
+                  : `Complete checkout (${basket.length} item${basket.length === 1 ? "" : "s"})`}
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="return" className="mt-6 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Return by barcode</CardTitle>
-              <CardDescription>Scan the copy barcode on the book being returned</CardDescription>
+              <CardDescription>
+                Scan each copy as it comes back — already-returned copies show a notice, not an error
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-2">
@@ -529,20 +750,37 @@ export default function CheckoutDeskClient({
                   placeholder="Scan return barcode…"
                   value={returnCode}
                   onChange={(e) => setReturnCode(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleReturn()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleReturn();
+                    }
+                  }}
+                  aria-label="Return barcode"
                 />
-                <Button type="button" onClick={handleReturn} disabled={pending || !returnCode.trim()}>
+                <Button
+                  type="button"
+                  onClick={handleReturn}
+                  disabled={pending || !returnCode.trim()}
+                >
                   {pending ? "Processing…" : "Mark returned"}
                 </Button>
               </div>
               <Scanner
                 onDetected={(code) => {
                   setReturnCode(code);
+                  if (isDuplicateScan(code)) return;
                   start(async () => {
                     try {
                       const res = await deskReturnByBarcode(code);
-                      setMessage(`Returned “${res.title}” from ${res.borrower}.`);
+                      setMessage(
+                        res.alreadyReturned
+                          ? (res.message ?? `Already returned: ${res.title}`)
+                          : (res.message ?? `Returned “${res.title}”.`),
+                      );
                       setReturnCode("");
+                      setError(null);
+                      flashScan(`Returned: ${res.title}`);
                     } catch (e) {
                       setError(e instanceof Error ? e.message : "Return failed.");
                     }

@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "crypto";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -8,6 +9,8 @@ import {
   parseSpreadsheetBuffer,
   type ParsedImportRow,
   IMPORT_TEMPLATE_CSV,
+  MAX_IMPORT_FILE_BYTES,
+  ALLOWED_IMPORT_EXTENSIONS,
 } from "@/lib/import-rows";
 import { digitsOnly } from "@/lib/barcode";
 import { lookupBookMetadata } from "@/lib/book-lookup";
@@ -21,6 +24,23 @@ async function requireImporter() {
     throw new Error("Unauthorized");
   }
   return session;
+}
+
+function validateUpload(file: File, buf: Buffer) {
+  const lower = file.name.toLowerCase();
+  if (!ALLOWED_IMPORT_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+    throw new Error("Use CSV or Excel (.csv, .xlsx, .xls) only.");
+  }
+  if (buf.byteLength > MAX_IMPORT_FILE_BYTES) {
+    throw new Error(`File exceeds ${MAX_IMPORT_FILE_BYTES / (1024 * 1024)} MB limit.`);
+  }
+  if (file.name.includes("..") || file.name.includes("/") || file.name.includes("\\")) {
+    throw new Error("Invalid filename.");
+  }
+}
+
+function fileHash(buf: Buffer): string {
+  return createHash("sha256").update(buf).digest("hex");
 }
 
 function normalizeAuthor(name: string) {
@@ -61,13 +81,11 @@ async function enrichRowFromLookup(row: ParsedImportRow): Promise<ParsedImportRo
   const needsLookup =
     !row.isbn ||
     !row.publicationYear ||
-    row.authors.length === 1 && row.authors[0] === "Unknown";
+    (row.authors.length === 1 && row.authors[0] === "Unknown");
 
   if (!needsLookup) return row;
 
-  const key = lookupKey;
-
-  const meta = await lookupBookMetadata(key);
+  const meta = await lookupBookMetadata(lookupKey);
   if (!meta) return row;
 
   return {
@@ -130,31 +148,71 @@ export async function getImportTemplateCsv(): Promise<string> {
   return IMPORT_TEMPLATE_CSV;
 }
 
+export type ImportPreviewResult = {
+  filename: string;
+  sheetName?: string;
+  headers: string[];
+  skippedEmpty: number;
+  preview: Array<{
+    row: number;
+    title: string;
+    authors: string;
+    year?: number;
+    isbn?: string;
+    upc?: string;
+    barcode?: string;
+    format: string;
+    validation?: "ok" | "warn" | "reject";
+    message?: string;
+  }>;
+  totalRows: number;
+  duplicateFileWarning?: string;
+};
+
 /** Preview parsed rows without writing to the database. */
-export async function previewSpreadsheet(formData: FormData) {
+export async function previewSpreadsheet(formData: FormData): Promise<ImportPreviewResult> {
   await requireImporter();
   const file = formData.get("file");
   if (!(file instanceof File)) throw new Error("Attach a file.");
 
   const buf = Buffer.from(await file.arrayBuffer());
+  validateUpload(file, buf);
   const parsed = parseSpreadsheetBuffer(buf, file.name);
+  const hash = fileHash(buf);
+
+  const prior = await prisma.importBatch.findFirst({
+    where: { fileHash: hash, createdCount: { gt: 0 } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const preview = await Promise.all(
+    parsed.rows.slice(0, 25).map(async (r) => {
+      const dup = await findDuplicate(r);
+      return {
+        row: r.rowNumber,
+        title: r.title,
+        authors: r.authors.join("; "),
+        year: r.publicationYear,
+        isbn: r.isbn,
+        upc: r.upc,
+        barcode: r.barcode,
+        format: r.format,
+        validation: (dup ? "reject" : "ok") as "ok" | "reject",
+        message: dup ?? undefined,
+      };
+    }),
+  );
 
   return {
     filename: parsed.filename,
     sheetName: parsed.sheetName,
     headers: parsed.headers,
     skippedEmpty: parsed.skippedEmpty,
-    preview: parsed.rows.slice(0, 25).map((r) => ({
-      row: r.rowNumber,
-      title: r.title,
-      authors: r.authors.join("; "),
-      year: r.publicationYear,
-      isbn: r.isbn,
-      upc: r.upc,
-      barcode: r.barcode,
-      format: r.format,
-    })),
+    preview,
     totalRows: parsed.rows.length,
+    duplicateFileWarning: prior
+      ? `This exact file was imported on ${prior.createdAt.toLocaleDateString()} (${prior.createdCount} rows created). Re-import may skip duplicates.`
+      : undefined,
   };
 }
 
@@ -163,9 +221,10 @@ export type ImportSpreadsheetResult = {
   skippedDup: number;
   skippedEmpty: number;
   errors: string[];
+  batchId: string;
 };
 
-/** Flexible CSV / Excel ingest with UPC columns, preview support, and per-row errors. */
+/** Flexible CSV / Excel ingest with validation, batch tracking, and per-row errors. */
 export async function importSpreadsheetBuffer(
   formData: FormData,
 ): Promise<ImportSpreadsheetResult> {
@@ -174,6 +233,8 @@ export async function importSpreadsheetBuffer(
   if (!(file instanceof File)) throw new Error("Attach a file.");
 
   const buf = Buffer.from(await file.arrayBuffer());
+  validateUpload(file, buf);
+  const hash = fileHash(buf);
   const parsed = parseSpreadsheetBuffer(buf, file.name);
 
   const branch = await prisma.branch.findFirst();
@@ -188,6 +249,16 @@ export async function importSpreadsheetBuffer(
         description: "Rows staged from CSV / Excel until taxonomists refine categories.",
       },
     }));
+
+  const batch = await prisma.importBatch.create({
+    data: {
+      filename: file.name,
+      fileHash: hash,
+      status: "PENDING",
+      totalRows: parsed.rows.length,
+      createdById: session.user.id,
+    },
+  });
 
   let created = 0;
   let skippedDup = 0;
@@ -211,22 +282,43 @@ export async function importSpreadsheetBuffer(
     }
   }
 
+  const status =
+    created === 0 && errors.length > 0
+      ? "FAILED"
+      : errors.length > 0
+        ? "PARTIAL"
+        : "COMPLETED";
+
+  await prisma.importBatch.update({
+    where: { id: batch.id },
+    data: {
+      status,
+      createdCount: created,
+      skippedCount: skippedDup,
+      rejectedCount: errors.length,
+      errorSummary: errors.slice(0, 100),
+    },
+  });
+
   await auditLog({
     actorId: session.user.id,
     action: "IMPORT",
-    entityType: "Item",
+    entityType: "ImportBatch",
+    entityId: batch.id,
     summary: `Imported ${created} rows, skipped ${skippedDup} duplicates`,
-    payload: { filename: file.name, errorCount: errors.length },
+    payload: { filename: file.name, errorCount: errors.length, fileHash: hash },
   });
 
   revalidatePath("/catalog");
   revalidatePath("/dashboard");
+  revalidatePath("/imports");
 
   return {
     created,
     skippedDup,
     skippedEmpty: parsed.skippedEmpty,
     errors: errors.slice(0, 50),
+    batchId: batch.id,
   };
 }
 
@@ -235,8 +327,12 @@ export async function previewPdfText(formData: FormData) {
   const file = formData.get("file");
   if (!(file instanceof File)) throw new Error("Attach a PDF.");
 
-  const pdfParse = (await import("pdf-parse")).default;
   const buf = Buffer.from(await file.arrayBuffer());
+  if (buf.byteLength > MAX_IMPORT_FILE_BYTES) {
+    throw new Error("PDF exceeds size limit.");
+  }
+
+  const pdfParse = (await import("pdf-parse")).default;
   const parsed = await pdfParse(buf);
   const lines = parsed.text
     .split(/\r?\n/)

@@ -25,15 +25,16 @@ const links: {
   icon: typeof Library;
   roles?: UserRole[];
 }[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["LIBRARIAN", "ADMIN"] },
   { href: "/catalog", label: "Catalog", icon: BookOpen },
+  { href: "/account", label: "My account", icon: Users, roles: ["MEMBER"] },
   {
     href: "/checkout",
     label: "Checkout desk",
     icon: BookCheck,
     roles: ["LIBRARIAN", "ADMIN"],
   },
-  { href: "/loans", label: "Loans & holds", icon: Library },
+  { href: "/loans", label: "Loans & holds", icon: Library, roles: ["LIBRARIAN", "ADMIN"] },
   {
     href: "/imports",
     label: "Import",
