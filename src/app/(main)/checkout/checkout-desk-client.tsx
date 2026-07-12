@@ -7,7 +7,9 @@ import {
   createDeskMember,
   deskCheckoutBasket,
   deskReturnByBarcode,
+  deskReturnByLoanId,
   resolveForCheckout,
+  searchActiveLoansForReturn,
   searchBooksForCheckout,
   searchDeskMembers,
   selectItemForCheckout,
@@ -15,6 +17,7 @@ import {
   type BookSearchHit,
   type DeskMember,
   type ResolveForCheckoutResult,
+  type ReturnSearchHit,
 } from "@/actions/checkout-desk";
 import { scanDedupeKey } from "@/lib/barcode";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -63,6 +66,8 @@ export default function CheckoutDeskClient({
   const [searchHits, setSearchHits] = useState<BookSearchHit[]>([]);
   const [bookCode, setBookCode] = useState("");
   const [returnCode, setReturnCode] = useState("");
+  const [returnSearch, setReturnSearch] = useState("");
+  const [returnHits, setReturnHits] = useState<ReturnSearchHit[]>([]);
   const [resolved, setResolved] = useState<ResolveForCheckoutResult | null>(null);
   const [selectedCopyId, setSelectedCopyId] = useState("");
   const [basket, setBasket] = useState<BasketItem[]>([]);
@@ -74,6 +79,7 @@ export default function CheckoutDeskClient({
   const wedgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastScanKey = useRef<{ key: string; at: number } | null>(null);
   const bookInputRef = useRef<HTMLInputElement>(null);
+  const checkoutSubmitting = useRef(false);
 
   const filteredMembers = members.filter((m) => {
     const q = memberSearch.trim().toLowerCase();
@@ -129,6 +135,7 @@ export default function CheckoutDeskClient({
         authors: res.authors,
         shelfHint: c.shelfHint,
         isSpecial: res.isSpecial,
+        dueDatePreview: c.dueDatePreview,
       });
       setResolved(null);
       setBookCode("");
@@ -186,6 +193,7 @@ export default function CheckoutDeskClient({
       authors: resolved.authors,
       shelfHint: copy.shelfHint,
       isSpecial: resolved.isSpecial,
+      dueDatePreview: copy.dueDatePreview,
     });
     setResolved(null);
     setSelectedCopyId("");
@@ -202,6 +210,8 @@ export default function CheckoutDeskClient({
       setError("Add at least one book to the basket.");
       return;
     }
+    if (checkoutSubmitting.current) return;
+    checkoutSubmitting.current = true;
     start(async () => {
       try {
         const res = await deskCheckoutBasket({
@@ -226,6 +236,44 @@ export default function CheckoutDeskClient({
         );
       } catch (e) {
         setError(e instanceof Error ? e.message : "Checkout failed.");
+      } finally {
+        checkoutSubmitting.current = false;
+      }
+    });
+  };
+
+  const runReturnSearch = () => {
+    const q = returnSearch.trim();
+    if (q.length < 2) {
+      setError("Type at least 2 characters to search returns.");
+      return;
+    }
+    setError(null);
+    start(async () => {
+      try {
+        const hits = await searchActiveLoansForReturn(q);
+        setReturnHits(hits);
+        if (!hits.length) setError("No active loans match that search.");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Return search failed.");
+      }
+    });
+  };
+
+  const returnFromSearchHit = (hit: ReturnSearchHit) => {
+    start(async () => {
+      try {
+        const res = await deskReturnByLoanId(hit.loanId);
+        setMessage(
+          res.alreadyReturned
+            ? (res.message ?? `Already returned: ${res.title}`)
+            : (res.message ?? `Returned “${res.title}”.`),
+        );
+        setReturnHits((prev) => prev.filter((h) => h.loanId !== hit.loanId));
+        setError(null);
+        flashScan(`Returned: ${res.title}`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Return failed.");
       }
     });
   };
@@ -701,6 +749,9 @@ export default function CheckoutDeskClient({
                         <p className="text-sm text-muted-foreground">
                           {item.authors} · Copy #{item.copyNumber}
                           {item.barcode ? ` · ${item.barcode}` : ""}
+                          {item.dueDatePreview
+                            ? ` · due ${new Date(item.dueDatePreview).toLocaleDateString()}`
+                            : ""}
                         </p>
                         {item.isSpecial ? (
                           <Badge variant="bloom" className="mt-1">
@@ -787,6 +838,63 @@ export default function CheckoutDeskClient({
                   });
                 }}
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Search when barcode is unreadable</CardTitle>
+              <CardDescription>Find by member name, email, or book title</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  className="max-w-lg"
+                  placeholder="Member or book title…"
+                  value={returnSearch}
+                  onChange={(e) => setReturnSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && runReturnSearch()}
+                />
+                <Button type="button" variant="secondary" onClick={runReturnSearch} disabled={pending}>
+                  Search loans
+                </Button>
+              </div>
+              {returnHits.length > 0 ? (
+                <ul className="divide-y rounded-lg border">
+                  {returnHits.map((hit) => (
+                    <li
+                      key={hit.loanId}
+                      className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="font-medium">{hit.title}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {hit.borrower} · Copy #{hit.copyNumber}
+                          {hit.barcode ? ` · ${hit.barcode}` : ""}
+                        </p>
+                        <p
+                          className={
+                            hit.overdue
+                              ? "text-sm font-medium text-destructive"
+                              : "text-sm text-muted-foreground"
+                          }
+                        >
+                          Due {new Date(hit.dueDate).toLocaleDateString()}
+                          {hit.overdue ? " (overdue)" : ""}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => returnFromSearchHit(hit)}
+                        disabled={pending}
+                      >
+                        Mark returned
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </CardContent>
           </Card>
         </TabsContent>

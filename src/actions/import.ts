@@ -13,6 +13,7 @@ import {
   ALLOWED_IMPORT_EXTENSIONS,
 } from "@/lib/import-rows";
 import { digitsOnly } from "@/lib/barcode";
+import { validateImportRow } from "@/lib/import-validate";
 import { lookupBookMetadata } from "@/lib/book-lookup";
 
 async function requireImporter() {
@@ -188,6 +189,9 @@ export async function previewSpreadsheet(formData: FormData): Promise<ImportPrev
   const preview = await Promise.all(
     parsed.rows.slice(0, 25).map(async (r) => {
       const dup = await findDuplicate(r);
+      const validation = validateImportRow(r);
+      const status = dup ? "reject" : validation.status;
+      const message = dup ?? (validation.messages.length ? validation.messages.join("; ") : undefined);
       return {
         row: r.rowNumber,
         title: r.title,
@@ -197,8 +201,8 @@ export async function previewSpreadsheet(formData: FormData): Promise<ImportPrev
         upc: r.upc,
         barcode: r.barcode,
         format: r.format,
-        validation: (dup ? "reject" : "ok") as "ok" | "reject",
-        message: dup ?? undefined,
+        validation: status as "ok" | "warn" | "reject",
+        message,
       };
     }),
   );
@@ -266,6 +270,13 @@ export async function importSpreadsheetBuffer(
 
   for (const rawRow of parsed.rows) {
     try {
+      const rowValidation = validateImportRow(rawRow);
+      if (rowValidation.status === "reject") {
+        skippedDup++;
+        errors.push(`Row ${rawRow.rowNumber}: ${rowValidation.messages.join("; ")}`);
+        continue;
+      }
+
       const row = await enrichRowFromLookup(rawRow);
       const dupReason = await findDuplicate(row);
       if (dupReason) {

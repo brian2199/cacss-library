@@ -19,6 +19,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { escapeCsvField } from "@/lib/csv-sanitize";
+
 type PreviewRow = {
   row: number;
   title: string;
@@ -28,6 +30,8 @@ type PreviewRow = {
   upc?: string;
   barcode?: string;
   format: string;
+  validation?: "ok" | "warn" | "reject";
+  message?: string;
 };
 
 export default function ImportsPageClient() {
@@ -37,9 +41,23 @@ export default function ImportsPageClient() {
     totalRows: number;
     headers: string[];
     rows: PreviewRow[];
+    duplicateFileWarning?: string;
   } | null>(null);
   const [pdfLines, setPdfLines] = useState<string[] | null>(null);
   const [pending, start] = useTransition();
+
+  const downloadErrorsCsv = () => {
+    if (!sheetErrors.length) return;
+    const header = "message\n";
+    const body = sheetErrors.map((line) => escapeCsvField(line)).join("\n");
+    const blob = new Blob([header + body], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cacss-import-errors.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const downloadTemplate = () => {
     start(async () => {
@@ -100,6 +118,7 @@ export default function ImportsPageClient() {
                     totalRows: res.totalRows,
                     headers: res.headers,
                     rows: res.preview as PreviewRow[],
+                    duplicateFileWarning: res.duplicateFileWarning,
                   });
                   setSheetMsg(
                     `Preview: ${res.totalRows} data rows (${res.skippedEmpty} empty lines skipped). Headers: ${res.headers.join(", ") || "(none)"}`,
@@ -118,30 +137,51 @@ export default function ImportsPageClient() {
             </Button>
           </form>
 
+          {preview?.duplicateFileWarning ? (
+            <Alert>
+              <AlertTitle>Previously imported file</AlertTitle>
+              <AlertDescription>{preview.duplicateFileWarning}</AlertDescription>
+            </Alert>
+          ) : null}
+
           {preview ? (
             <div className="overflow-auto rounded-lg border">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Row</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Title</TableHead>
                     <TableHead>Authors</TableHead>
                     <TableHead>Year</TableHead>
                     <TableHead>ISBN</TableHead>
-                    <TableHead>UPC</TableHead>
-                    <TableHead>Barcode</TableHead>
+                    <TableHead>Notes</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {preview.rows.map((r) => (
                     <TableRow key={r.row}>
                       <TableCell>{r.row}</TableCell>
+                      <TableCell>
+                        <span
+                          className={
+                            r.validation === "reject"
+                              ? "text-destructive"
+                              : r.validation === "warn"
+                                ? "text-amber-600"
+                                : "text-primary"
+                          }
+                        >
+                          {r.validation ?? "ok"}
+                        </span>
+                      </TableCell>
                       <TableCell className="max-w-[200px] truncate">{r.title}</TableCell>
                       <TableCell className="max-w-[160px] truncate">{r.authors}</TableCell>
                       <TableCell>{r.year ?? "—"}</TableCell>
                       <TableCell className="font-mono text-xs">{r.isbn ?? "—"}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.upc ?? "—"}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.barcode ?? "—"}</TableCell>
+                      <TableCell className="max-w-[180px] truncate text-xs text-muted-foreground">
+                        {r.message ?? "—"}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -199,6 +239,15 @@ export default function ImportsPageClient() {
                     <li key={line}>{line}</li>
                   ))}
                 </ul>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={downloadErrorsCsv}
+                >
+                  Download errors CSV
+                </Button>
               </AlertDescription>
             </Alert>
           ) : null}

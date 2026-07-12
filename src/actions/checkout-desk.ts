@@ -110,6 +110,19 @@ export type BasketItem = {
   authors: string;
   shelfHint: string | null;
   isSpecial: boolean;
+  dueDatePreview?: string;
+};
+
+export type ReturnSearchHit = {
+  loanId: string;
+  copyId: string;
+  barcode: string | null;
+  title: string;
+  copyNumber: number;
+  borrower: string;
+  borrowerEmail: string;
+  dueDate: string;
+  overdue: boolean;
 };
 
 export type ResolveForCheckoutResult =
@@ -552,14 +565,79 @@ export async function getBasketCopyDetails(
     },
   });
 
-  return copies.map((c) => ({
-    copyId: c.id,
-    copyNumber: c.copyNumber,
-    barcode: c.barcode,
-    title: c.item.title,
-    authors:
-      c.item.authors.map((a) => a.author.displayName).join(", ") || "Unknown author",
-    shelfHint: c.shelfLocation?.label ?? c.shelfLocation?.code ?? null,
-    isSpecial: isSpecialItem(c.item),
+  return copies.map((c) => {
+    const loanDays =
+      c.item.requiresRareApproval || c.item.rareProtected
+        ? c.item.loanDaysRare
+        : c.item.loanDaysDefault;
+    const due = new Date();
+    due.setDate(due.getDate() + loanDays);
+    return {
+      copyId: c.id,
+      copyNumber: c.copyNumber,
+      barcode: c.barcode,
+      title: c.item.title,
+      authors:
+        c.item.authors.map((a) => a.author.displayName).join(", ") || "Unknown author",
+      shelfHint: c.shelfLocation?.label ?? c.shelfLocation?.code ?? null,
+      isSpecial: isSpecialItem(c.item),
+      dueDatePreview: due.toISOString(),
+    };
+  });
+}
+
+export async function searchActiveLoansForReturn(query: string): Promise<ReturnSearchHit[]> {
+  await requireStaff();
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const loans = await prisma.loan.findMany({
+    where: {
+      status: "ACTIVE",
+      OR: [
+        { itemCopy: { barcode: { contains: q, mode: "insensitive" } } },
+        { itemCopy: { item: { title: { contains: q, mode: "insensitive" } } } },
+        { memberProfile: { user: { name: { contains: q, mode: "insensitive" } } } },
+        { memberProfile: { user: { email: { contains: q, mode: "insensitive" } } } },
+      ],
+    },
+    include: {
+      itemCopy: { include: { item: true } },
+      memberProfile: { include: { user: true } },
+    },
+    orderBy: { dueDate: "asc" },
+    take: 15,
+  });
+
+  const now = new Date();
+  return loans.map((loan) => ({
+    loanId: loan.id,
+    copyId: loan.itemCopyId,
+    barcode: loan.itemCopy.barcode,
+    title: loan.itemCopy.item.title,
+    copyNumber: loan.itemCopy.copyNumber,
+    borrower: loan.memberProfile.user.name ?? loan.memberProfile.user.email,
+    borrowerEmail: loan.memberProfile.user.email,
+    dueDate: loan.dueDate.toISOString(),
+    overdue: loan.dueDate < now,
   }));
+}
+
+export async function deskReturnByLoanId(loanId: string) {
+  await requireStaff();
+  const loan = await prisma.loan.findUnique({
+    where: { id: loanId },
+    include: {
+      itemCopy: { include: { item: true } },
+      memberProfile: { include: { user: true } },
+    },
+  });
+  if (!loan) throw new Error("Loan not found.");
+  if (loan.status !== "ACTIVE") {
+    return deskReturnByBarcode(loan.itemCopy.barcode ?? "");
+  }
+  if (!loan.itemCopy.barcode) {
+    throw new Error("Copy has no barcode — use desk return with a manual note on the loans page.");
+  }
+  return deskReturnByBarcode(loan.itemCopy.barcode);
 }

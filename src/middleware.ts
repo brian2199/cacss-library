@@ -2,12 +2,24 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
+const STAFF_ROUTE_PREFIXES = [
+  "/dashboard",
+  "/checkout",
+  "/scan",
+  "/imports",
+  "/reports",
+  "/labels",
+  "/members",
+  "/approvals",
+];
+
 export async function middleware(req: NextRequest) {
   const token = await getToken({
     req,
     secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   });
   const isLoggedIn = !!token;
+  const role = token?.role as string | undefined;
 
   const { pathname } = req.nextUrl;
 
@@ -29,9 +41,16 @@ export async function middleware(req: NextRequest) {
   }
 
   if (isLoggedIn && pathname === "/login") {
-    const role = token?.role as string | undefined;
     const dest = role === "MEMBER" ? "/catalog" : "/dashboard";
     return NextResponse.redirect(new URL(dest, req.nextUrl.origin));
+  }
+
+  if (
+    isLoggedIn &&
+    role === "MEMBER" &&
+    STAFF_ROUTE_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  ) {
+    return NextResponse.redirect(new URL("/account", req.nextUrl.origin));
   }
 
   return NextResponse.next();

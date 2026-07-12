@@ -95,75 +95,81 @@ export default async function CatalogItemPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Bibliographic snapshot</CardTitle>
-          <CardDescription>
-            Stewardship metadata includes rarity posture, donor provenance, and future OCR hooks via attachments.
-          </CardDescription>
+          <CardTitle>{staff ? "Bibliographic snapshot" : "About this title"}</CardTitle>
+          {staff ? (
+            <CardDescription>
+              Stewardship metadata includes rarity posture and volunteer notes.
+            </CardDescription>
+          ) : null}
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <div>
-            <p className="text-xs font-semibold uppercase text-muted-foreground">
-              Authors
-            </p>
+            <p className="text-xs font-semibold uppercase text-muted-foreground">Authors</p>
             <p>{item.authors.map((a) => a.author.displayName).join(", ")}</p>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase text-muted-foreground">
-              Publisher / binding
+              Publisher {item.publicationYear ? `/ ${item.publicationYear}` : ""}
             </p>
             <p>
               {item.publisher ?? "—"}
-              {item.bindingType ? ` · ${item.bindingType}` : ""}
+              {item.bindingType ? ` · ${item.bindingType.replaceAll("_", " ")}` : ""}
             </p>
           </div>
-          <div>
-            <p className="text-xs font-semibold uppercase text-muted-foreground">
-              ISBN / pages
-            </p>
-            <p>
-              {item.isbn ?? "—"}
-              {item.pages ? ` · ${item.pages} pp.` : ""}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase text-muted-foreground">
-              Est. value / rarity score
-            </p>
-            <p>
-              {item.estimatedValue ? `$${item.estimatedValue.toString()}` : "—"}
-              {` · score ${item.rarityScore}`}
-            </p>
-          </div>
-          <div className="md:col-span-2">
-            <p className="text-xs font-semibold uppercase text-muted-foreground">
-              Botanical genera
-            </p>
-            <div className="mt-1 flex flex-wrap gap-2">
-              {item.botanicalGenera.length ? (
-                item.botanicalGenera.map((g) => (
+          {!staff ? null : (
+            <>
+              <div>
+                <p className="text-xs font-semibold uppercase text-muted-foreground">
+                  ISBN / pages
+                </p>
+                <p>
+                  {item.isbn ?? "—"}
+                  {item.pages ? ` · ${item.pages} pp.` : ""}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase text-muted-foreground">
+                  Est. value / rarity score
+                </p>
+                <p>
+                  {item.estimatedValue ? `$${item.estimatedValue.toString()}` : "—"}
+                  {` · score ${item.rarityScore}`}
+                </p>
+              </div>
+            </>
+          )}
+          {item.botanicalGenera.length ? (
+            <div className="md:col-span-2">
+              <p className="text-xs font-semibold uppercase text-muted-foreground">Subjects</p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {item.botanicalGenera.map((g) => (
                   <Badge key={g} variant="outline">
                     {g}
                   </Badge>
-                ))
-              ) : (
-                <span className="text-sm text-muted-foreground">Not indexed yet</span>
-              )}
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="md:col-span-2">
-            <p className="text-xs font-semibold uppercase text-muted-foreground">
-              Volunteer notes
-            </p>
-            <p className="text-sm">{item.notes ?? "No notes yet."}</p>
-          </div>
+          ) : null}
+          {staff ? (
+            <div className="md:col-span-2">
+              <p className="text-xs font-semibold uppercase text-muted-foreground">
+                Volunteer notes
+              </p>
+              <p className="text-sm">{item.notes ?? "No notes yet."}</p>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Copies & circulation posture</CardTitle>
+          <CardTitle>{staff ? "Copies & circulation posture" : "Availability"}</CardTitle>
           <CardDescription>
-            Missing or damaged copies stay visible for accountability. Reference-only works cannot leave the reading room.
+            {staff
+              ? "Missing or damaged copies stay visible for accountability."
+              : item.referenceOnly
+                ? "Reference use in the reading room — does not circulate."
+                : "Contact a librarian to borrow available copies."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-8">
@@ -171,30 +177,38 @@ export default async function CatalogItemPage({
             <div key={copy.id} className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="font-medium">
-                    Copy #{copy.copyNumber}{" "}
-                    <span className="text-muted-foreground">
-                      {copy.barcode ? `· ${copy.barcode}` : ""}
-                    </span>
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Shelf{" "}
-                    {copy.shelfLocation
-                      ? `${copy.shelfLocation.branch.name} · ${copy.shelfLocation.code}`
-                      : "unassigned"}
-                    {copy.donor ? ` · donor ${copy.donor.name}` : ""}
-                  </p>
+                  {staff ? (
+                    <>
+                      <p className="font-medium">
+                        Copy #{copy.copyNumber}{" "}
+                        <span className="text-muted-foreground">
+                          {copy.barcode ? `· ${copy.barcode}` : ""}
+                        </span>
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Shelf{" "}
+                        {copy.shelfLocation
+                          ? `${copy.shelfLocation.branch.name} · ${copy.shelfLocation.code}`
+                          : "unassigned"}
+                        {copy.donor ? ` · donor ${copy.donor.name}` : ""}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {copy.shelfLocation
+                        ? `Shelf ${copy.shelfLocation.label ?? copy.shelfLocation.code}`
+                        : "Ask a librarian for shelf location"}
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {copy.missing ? <Badge variant="destructive">Missing</Badge> : null}
                   {copy.damaged ? <Badge variant="warn">Damaged</Badge> : null}
-                  {copy.loans.length ? (
-                    <Badge variant="secondary">
-                      {copy.loans[0].status === "PENDING_RARE_APPROVAL"
-                        ? "Awaiting rare approval"
-                        : "Checked out"}
-                    </Badge>
-                  ) : (
+                  {item.referenceOnly ? (
+                    <Badge variant="secondary">Reference only</Badge>
+                  ) : copy.loans.length ? (
+                    <Badge variant="secondary">Checked out</Badge>
+                  ) : copy.missing ? null : (
                     <Badge variant="outline">Available</Badge>
                   )}
                 </div>
@@ -208,7 +222,7 @@ export default async function CatalogItemPage({
                 <CopyCheckoutPanel copyId={copy.id} members={memberOptions} />
               ) : null}
 
-              {copy.conditionLog.length ? (
+              {staff && copy.conditionLog.length ? (
                 <div>
                   <p className="text-sm font-semibold">Recent condition notes</p>
                   <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
@@ -231,29 +245,27 @@ export default async function CatalogItemPage({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Digital attachments</CardTitle>
-          <CardDescription>
-            Cover scans and PDF surrogates feed future OCR + semantic search pipelines.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {item.attachments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No files uploaded yet — librarians can attach scans from the imports workflow.
-            </p>
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {item.attachments.map((a) => (
-                <li key={a.id}>
-                  <Badge variant="outline">{a.kind}</Badge> {a.filename}
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      {staff ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Digital attachments</CardTitle>
+            <CardDescription>Cover scans and PDF surrogates for future OCR pipelines.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {item.attachments.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No files uploaded yet.</p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {item.attachments.map((a) => (
+                  <li key={a.id}>
+                    <Badge variant="outline">{a.kind}</Badge> {a.filename}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {!session ? (
         <p className="text-sm text-muted-foreground">
