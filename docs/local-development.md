@@ -3,10 +3,21 @@
 ## Requirements
 
 - **Node.js 22+** (see `.nvmrc`)
-- **Docker** (recommended for PostgreSQL)
+- **PostgreSQL 16** — Docker Compose (recommended) or a native install
 - **npm** 10+
 
-## Quick start
+## One-command local setup
+
+```bash
+npm run local:setup   # creates .env, migrates, seeds demo data
+npm test              # Vitest unit tests
+npm run local:test    # setup + unit tests + typecheck
+npm run dev           # http://localhost:3001
+```
+
+`local:setup` prefers Docker Compose (`db` on host port **5433**). If Docker is unavailable but Postgres is already listening on **5432**, it uses that instead.
+
+## Manual quick start (Docker)
 
 ```bash
 cp .env.example .env
@@ -22,14 +33,31 @@ npm run dev
 
 Open **http://localhost:3001**
 
+## Manual quick start (native Postgres, no Docker)
+
+```bash
+# Ensure Postgres is running and database exists:
+#   createdb -O postgres cacss   (or equivalent)
+# Role password should be postgres for the default URL below.
+
+cp .env.example .env
+# Set DATABASE_URL to port 5432 (not 5433):
+# DATABASE_URL="postgresql://postgres:postgres@localhost:5432/cacss?schema=public"
+# Set AUTH_SECRET: openssl rand -base64 32
+
+npm ci
+npx prisma migrate deploy
+npm run db:seed
+npm run dev
+```
+
 ## Ports
 
-| Service | Host port | Container port |
-|---------|-----------|----------------|
-| Next.js app | **3001** | 3001 (in full stack) |
-| PostgreSQL | **5433** | 5432 |
-
-Do not use port 3000 — the app is configured for 3001.
+| Service | Host port | Notes |
+|---------|-----------|-------|
+| Next.js app | **3001** | Always — do not use 3000 |
+| PostgreSQL (Docker) | **5433** | Maps to container 5432 |
+| PostgreSQL (native) | **5432** | Use this in `.env` when not using Docker |
 
 ## Demo credentials (development seed only)
 
