@@ -14,14 +14,21 @@ Modern library operations console for the **Central Arizona Cactus & Succulent S
 ## Quick start (local)
 
 ```bash
+# One-command bootstrap (Docker db preferred; falls back to native Postgres on 5432)
+npm run local:setup
+npm run dev
+```
+
+Or manually:
+
+```bash
 cp .env.example .env
-# edit AUTH_SECRET (see .env.example for DATABASE_URL — host port 5433 by default)
+# edit AUTH_SECRET (Docker: DATABASE_URL port 5433; native Postgres: 5432)
 
-# Start Postgres (or use Docker Compose db service only)
-docker compose up -d db
+docker compose up -d db   # skip if using native Postgres
 
-npx prisma migrate deploy   # or: npx prisma db push
-npm run db:seed             # prisma db seed
+npx prisma migrate deploy
+npm run db:seed
 
 npm run dev
 ```

@@ -17,6 +17,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "local:setup": "bash scripts/local-setup.sh",
+    "local:test": "bash scripts/local-setup.sh && npm test && npm run typecheck",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"prisma/**/*.prisma\" 2>/dev/null || true",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
